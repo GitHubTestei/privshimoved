@@ -1,0 +1,1370 @@
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+-- =====================
+--   STATE
+-- =====================
+local state = {
+    killAura  = false,
+    autoBlock = false,
+    deathTP   = false,
+    hurtReset = false,
+    farmFix   = false,
+    autoBully = false,
+    distAura  = false,
+    hitbox    = false,
+}
+
+local keybinds = {
+    killAura        = nil,
+    autoBlock       = nil,
+    deathTP         = nil,
+    distAura        = nil,
+    hitbox          = nil,
+    clickAddTarget  = nil,
+    clickAddFriend  = nil,
+}
+
+local killAuraMulti  = 10
+local deathTPDelay   = 0
+local farmFixDelay   = 1
+local distModeRadius = 10
+local hitboxSize     = 10
+local hitboxRainbow  = true
+local distVisualizerOn = false
+local distRingPart = nil
+local rainbowHue = 0
+
+local clickMode = nil
+local friendsList = {}
+local targetsList = {}
+local deathPosition = nil
+local settingKeybind = nil
+local guiVisible = true
+local highlights = {}
+local targetsBox = nil
+local friendsBox = nil
+
+local lastDeathTime = 0
+
+-- =====================
+--   CONFIG SAVE/LOAD
+-- =====================
+local CONFIG_FILE = "aura_gui_config.json"
+
+local function saveConfig()
+    if not writefile then return end
+    local data = {
+        keybinds = {
+            killAura       = keybinds.killAura       and keybinds.killAura.Name       or "None",
+            autoBlock      = keybinds.autoBlock      and keybinds.autoBlock.Name      or "None",
+            deathTP        = keybinds.deathTP        and keybinds.deathTP.Name        or "None",
+            distAura       = keybinds.distAura       and keybinds.distAura.Name       or "None",
+            hitbox         = keybinds.hitbox         and keybinds.hitbox.Name         or "None",
+            clickAddTarget = keybinds.clickAddTarget and keybinds.clickAddTarget.Name or "None",
+            clickAddFriend = keybinds.clickAddFriend and keybinds.clickAddFriend.Name or "None",
+        },
+        friends = table.concat(friendsList, " "),
+    }
+    writefile(CONFIG_FILE, HttpService:JSONEncode(data))
+end
+
+local function splitWords(str)
+    local words = {}
+    for w in str:gmatch("%S+") do
+        table.insert(words, w:lower())
+    end
+    return words
+end
+
+local function loadConfig()
+    if not (readfile and isfile) then return end
+    if not isfile(CONFIG_FILE) then return end
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(readfile(CONFIG_FILE))
+    end)
+    if not ok or not data then return end
+    if data.keybinds then
+        for k, name in pairs(data.keybinds) do
+            if keybinds[k] ~= nil or true then
+                if name ~= "None" and keybinds[k] == nil then
+                    local ok2, kc = pcall(function() return Enum.KeyCode[name] end)
+                    if ok2 and kc then keybinds[k] = kc end
+                end
+            end
+        end
+    end
+    if data.friends and data.friends ~= "" then friendsList = splitWords(data.friends) end
+end
+
+loadConfig()
+
+-- =====================
+--   NAME MATCHING
+-- =====================
+local function matchesPartial(player, partial)
+    local u = player.Name:lower()
+    local d = player.DisplayName:lower()
+    return u:find(partial, 1, true) ~= nil or d:find(partial, 1, true) ~= nil
+end
+
+local function isFriend(player)
+    for _, p in ipairs(friendsList) do
+        if matchesPartial(player, p) then return true end
+    end
+    return false
+end
+
+local function isTarget(player)
+    for _, p in ipairs(targetsList) do
+        if matchesPartial(player, p) then return true end
+    end
+    return false
+end
+
+-- =====================
+--   LIST HELPERS
+-- =====================
+local function removeFromList(list, player)
+    local newList = {}
+    for _, partial in ipairs(list) do
+        if not matchesPartial(player, partial) then
+            table.insert(newList, partial)
+        end
+    end
+    return newList
+end
+
+local function addExactToList(list, name)
+    for _, v in ipairs(list) do
+        if v == name then return list end
+    end
+    local new = {}
+    for _, v in ipairs(list) do table.insert(new, v) end
+    table.insert(new, name)
+    return new
+end
+
+-- =====================
+--   HIGHLIGHT SYSTEM
+-- =====================
+local function removeHighlight(player)
+    if highlights[player] then
+        highlights[player]:Destroy()
+        highlights[player] = nil
+    end
+end
+
+local function applyHighlight(player)
+    if not player.Character then return end
+    removeHighlight(player)
+    local isFriendP = isFriend(player)
+    local isTargetP = isTarget(player)
+    if not isFriendP and not isTargetP then return end
+    local h = Instance.new("Highlight")
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.FillTransparency = 0.90
+    h.OutlineTransparency = 0.5
+    if isFriendP then
+        h.FillColor    = Color3.fromRGB(50, 255, 80)
+        h.OutlineColor = Color3.fromRGB(50, 255, 80)
+    else
+        h.FillColor    = Color3.fromRGB(255, 50, 50)
+        h.OutlineColor = Color3.fromRGB(255, 50, 50)
+    end
+    h.Adornee = player.Character
+    h.Parent  = player.Character
+    highlights[player] = h
+end
+
+local function refreshAllHighlights()
+    for player in pairs(highlights) do removeHighlight(player) end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then applyHighlight(player) end
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function() task.wait(0.5) applyHighlight(player) end)
+end)
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= localPlayer then
+        player.CharacterAdded:Connect(function() task.wait(0.5) applyHighlight(player) end)
+    end
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    if isTarget(player) then
+        targetsList = removeFromList(targetsList, player)
+        if targetsBox then targetsBox.Text = table.concat(targetsList, " ") end
+        saveConfig()
+        refreshAllHighlights()
+    end
+end)
+
+-- =====================
+--   CLICK-TO-ADD LOGIC
+-- =====================
+local function visibleWallBetween(fromPos, toPos)
+    local direction = toPos - fromPos
+    local exclude = {}
+    if localPlayer.Character then
+        table.insert(exclude, localPlayer.Character)
+    end
+    local maxIterations = 30
+    local currentOrigin = fromPos
+    for _ = 1, maxIterations do
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = exclude
+        local result = workspace:Raycast(currentOrigin, direction, params)
+        if not result then return false end
+        local hit = result.Instance
+        local hitDist = (result.Position - fromPos).Magnitude
+        local totalDist = direction.Magnitude
+        if hitDist >= totalDist - 0.5 then return false end
+        local isCharPart = false
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character and hit:IsDescendantOf(player.Character) then
+                isCharPart = true
+                break
+            end
+        end
+        if isCharPart then
+            table.insert(exclude, hit)
+            currentOrigin = result.Position + direction.Unit * 0.01
+        elseif hit.Transparency >= 1 then
+            table.insert(exclude, hit)
+            currentOrigin = result.Position + direction.Unit * 0.01
+        else
+            return true
+        end
+    end
+    return false
+end
+
+local function getClosestPlayerToScreen(screenPos)
+    local closest = nil
+    local closestDist = math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character then
+            local root = player.Character:FindFirstChild("HumanoidRootPart")
+                      or player.Character:FindFirstChild("Head")
+            if root then
+                local screenPoint, _ = camera:WorldToScreenPoint(root.Position)
+                local dx = screenPoint.X - screenPos.X
+                local dy = screenPoint.Y - screenPos.Y
+                local dist = math.sqrt(dx*dx + dy*dy)
+                if dist < closestDist then
+                    closestDist = dist
+                    closest = player
+                end
+            end
+        end
+    end
+    if closestDist > 120 then return nil end
+    if not closest or not closest.Character then return nil end
+    if isFriend(closest) or isTarget(closest) then return closest end
+    local root = closest.Character:FindFirstChild("HumanoidRootPart")
+              or closest.Character:FindFirstChild("Head")
+    if root and visibleWallBetween(camera.CFrame.Position, root.Position) then
+        return nil
+    end
+    return closest
+end
+
+local function handleClickAdd(screenPos)
+    if not clickMode then return end
+    local player = getClosestPlayerToScreen(screenPos)
+    if not player then return end
+    local name = player.Name:lower()
+    if clickMode == "target" then
+        if isTarget(player) then
+            targetsList = removeFromList(targetsList, player)
+        elseif isFriend(player) then
+            return
+        else
+            targetsList = addExactToList(targetsList, name)
+        end
+        if targetsBox then targetsBox.Text = table.concat(targetsList, " ") end
+    elseif clickMode == "friend" then
+        if isFriend(player) then
+            friendsList = removeFromList(friendsList, player)
+        elseif isTarget(player) then
+            return
+        else
+            friendsList = addExactToList(friendsList, name)
+        end
+        if friendsBox then friendsBox.Text = table.concat(friendsList, " ") end
+    end
+    saveConfig()
+    refreshAllHighlights()
+end
+
+-- =====================
+--   FLOAT BUTTON
+-- =====================
+if playerGui:FindFirstChild("ExploitGuiToggle") then
+    playerGui.ExploitGuiToggle:Destroy()
+end
+local toggleGuiOverlay = Instance.new("ScreenGui")
+toggleGuiOverlay.Name = "ExploitGuiToggle"
+toggleGuiOverlay.ResetOnSpawn = false
+toggleGuiOverlay.DisplayOrder = 9999
+toggleGuiOverlay.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+toggleGuiOverlay.Parent = playerGui
+
+local floatBtn = Instance.new("TextButton")
+floatBtn.Size = UDim2.new(0, 70, 0, 44)
+floatBtn.Position = UDim2.new(1, -80, 0, 10)
+floatBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+floatBtn.BorderSizePixel = 0
+floatBtn.Text = "HIDE"
+floatBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+floatBtn.TextSize = 14
+floatBtn.Font = Enum.Font.GothamBold
+floatBtn.Parent = toggleGuiOverlay
+Instance.new("UICorner", floatBtn).CornerRadius = UDim.new(0, 4)
+local floatStroke = Instance.new("UIStroke", floatBtn)
+floatStroke.Color = Color3.fromRGB(180, 180, 180)
+floatStroke.Thickness = 1
+
+-- =====================
+--   MAIN GUI FRAME
+-- =====================
+if playerGui:FindFirstChild("ExploitGui") then
+    playerGui.ExploitGui:Destroy()
+end
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ExploitGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 170, 0, 290)
+mainFrame.Position = UDim2.new(0, 10, 0.5, -145)
+mainFrame.BackgroundColor3 = Color3.fromRGB(8, 12, 18)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+local border = Instance.new("UIStroke")
+border.Color = Color3.fromRGB(220, 220, 220)
+border.Thickness = 1.5
+border.Parent = mainFrame
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 6)
+
+local function toggleGui()
+    guiVisible = not guiVisible
+    mainFrame.Visible = guiVisible
+    floatBtn.Text = guiVisible and "HIDE" or "SHOW"
+end
+
+floatBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch
+    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        toggleGui()
+    end
+end)
+
+-- =====================
+--   DRAG
+-- =====================
+local dragging = false
+local dragStartPos = nil
+local frameStartPos = nil
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+titleBar.BorderSizePixel = 0
+titleBar.Active = true
+titleBar.Parent = mainFrame
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 6)
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch
+    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+        frameStartPos = mainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType == Enum.UserInputType.Touch
+    or input.UserInputType == Enum.UserInputType.MouseMovement then
+        local pos = Vector2.new(input.Position.X, input.Position.Y)
+        local delta = pos - dragStartPos
+        mainFrame.Position = UDim2.new(
+            frameStartPos.X.Scale, frameStartPos.X.Offset + delta.X,
+            frameStartPos.Y.Scale, frameStartPos.Y.Offset + delta.Y
+        )
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch
+    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -10, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "AURA GUI"
+titleLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+titleLabel.TextSize = 12
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+local subtitleLabel = Instance.new("TextLabel")
+subtitleLabel.Size = UDim2.new(1, -10, 1, 0)
+subtitleLabel.BackgroundTransparency = 1
+subtitleLabel.Text = "DRAG TO MOVE"
+subtitleLabel.TextColor3 = Color3.fromRGB(100, 100, 120)
+subtitleLabel.TextSize = 7
+subtitleLabel.Font = Enum.Font.Gotham
+subtitleLabel.TextXAlignment = Enum.TextXAlignment.Right
+subtitleLabel.Parent = titleBar
+
+-- =====================
+--   SCROLL FRAME
+-- =====================
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, 0, 1, -40)
+scrollFrame.Position = UDim2.new(0, 0, 0, 40)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.BorderSizePixel = 0
+scrollFrame.ScrollBarThickness = 3
+scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(200, 200, 200)
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scrollFrame.Parent = mainFrame
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, 0, 0, 0)
+content.AutomaticSize = Enum.AutomaticSize.Y
+content.BackgroundTransparency = 1
+content.Parent = scrollFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 1)
+listLayout.Parent = content
+
+-- =====================
+--   UI COMPONENT BUILDERS
+-- =====================
+local function createSectionHeader(text)
+    local header = Instance.new("Frame")
+    header.Size = UDim2.new(1, 0, 0, 28)
+    header.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+    header.BorderSizePixel = 0
+    header.Parent = content
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -12, 1, 0)
+    label.Position = UDim2.new(0, 12, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.TextSize = 10
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = header
+end
+
+local function createSlider(labelText, minVal, maxVal, defaultVal, isInt, unit, onChange)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 50)
+    row.BackgroundColor3 = Color3.fromRGB(10, 14, 20)
+    row.BorderSizePixel = 0
+    row.Parent = content
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop = UDim.new(0, 8)
+    pad.Parent = row
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(0.6, 0, 0, 13)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = labelText
+    nameLabel.TextColor3 = Color3.fromRGB(160, 180, 200)
+    nameLabel.TextSize = 9
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = row
+
+    local valLabel = Instance.new("TextLabel")
+    valLabel.Size = UDim2.new(0.4, 0, 0, 13)
+    valLabel.BackgroundTransparency = 1
+    valLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
+    valLabel.TextSize = 9
+    valLabel.Font = Enum.Font.GothamBold
+    valLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valLabel.Parent = row
+
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(1, 0, 0, 6)
+    track.Position = UDim2.new(0, 0, 0, 22)
+    track.BackgroundColor3 = Color3.fromRGB(30, 40, 55)
+    track.BorderSizePixel = 0
+    track.Active = true
+    track.Parent = row
+    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 3)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(160, 160, 190)
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
+
+    local thumb = Instance.new("Frame")
+    thumb.Size = UDim2.new(0, 14, 0, 14)
+    thumb.AnchorPoint = Vector2.new(0.5, 0.5)
+    thumb.Position = UDim2.new(0, 0, 0.5, 0)
+    thumb.BackgroundColor3 = Color3.fromRGB(230, 230, 230)
+    thumb.BorderSizePixel = 0
+    thumb.ZIndex = 3
+    thumb.Active = true
+    thumb.Parent = track
+    Instance.new("UICorner", thumb).CornerRadius = UDim.new(1, 0)
+
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, 0, 0, 1)
+    divider.Position = UDim2.new(0, 0, 1, -1)
+    divider.BackgroundColor3 = Color3.fromRGB(18, 28, 38)
+    divider.BorderSizePixel = 0
+    divider.Parent = row
+
+    local currentVal = defaultVal
+    local sliding = false
+
+    local function formatVal(v)
+        if isInt then
+            return tostring(math.floor(v + 0.5)) .. unit
+        else
+            return string.format("%.1f", v) .. unit
+        end
+    end
+
+    local function setVal(v)
+        v = math.clamp(v, minVal, maxVal)
+        if isInt then v = math.floor(v + 0.5) end
+        currentVal = v
+        local pct = (v - minVal) / (maxVal - minVal)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        thumb.Position = UDim2.new(pct, 0, 0.5, 0)
+        valLabel.Text = formatVal(v)
+        onChange(v)
+    end
+
+    local function handlePos(inputPos)
+        local tp = track.AbsolutePosition
+        local ts = track.AbsoluteSize
+        local x = math.clamp(inputPos.X - tp.X, 0, ts.X)
+        local pct = x / ts.X
+        setVal(minVal + pct * (maxVal - minVal))
+    end
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+            handlePos(Vector2.new(input.Position.X, input.Position.Y))
+        end
+    end)
+    thumb.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not sliding then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            handlePos(Vector2.new(input.Position.X, input.Position.Y))
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
+    end)
+
+    setVal(defaultVal)
+    return function() return currentVal end
+end
+
+local rows = {}
+
+local function createRow(featureKey, labelText, description)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 90)
+    row.BackgroundColor3 = Color3.fromRGB(12, 16, 22)
+    row.BorderSizePixel = 0
+    row.Parent = content
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop = UDim.new(0, 10)
+    pad.Parent = row
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(0.6, 0, 0, 18)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = labelText
+    nameLabel.TextColor3 = Color3.fromRGB(220, 235, 245)
+    nameLabel.TextSize = 13
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = row
+
+    local descLabel = Instance.new("TextLabel")
+    descLabel.Size = UDim2.new(1, 0, 0, 14)
+    descLabel.Position = UDim2.new(0, 0, 0, 20)
+    descLabel.BackgroundTransparency = 1
+    descLabel.Text = description
+    descLabel.TextColor3 = Color3.fromRGB(60, 100, 130)
+    descLabel.TextSize = 10
+    descLabel.Font = Enum.Font.Gotham
+    descLabel.TextXAlignment = Enum.TextXAlignment.Left
+    descLabel.Parent = row
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0, 54, 0, 26)
+    toggleBtn.Position = UDim2.new(1, -54, 0, -4)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(25, 35, 48)
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Text = "OFF"
+    toggleBtn.TextColor3 = Color3.fromRGB(100, 130, 160)
+    toggleBtn.TextSize = 11
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.Parent = row
+    Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 4)
+
+    local kbLabel = keybinds[featureKey] and ("[" .. keybinds[featureKey].Name .. "]") or "[NONE]"
+    local keybindBtn = Instance.new("TextButton")
+    keybindBtn.Size = UDim2.new(1, 0, 0, 22)
+    keybindBtn.Position = UDim2.new(0, 0, 0, 48)
+    keybindBtn.BackgroundColor3 = Color3.fromRGB(10, 20, 32)
+    keybindBtn.BorderSizePixel = 0
+    keybindBtn.Text = "KEYBIND: " .. kbLabel
+    keybindBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+    keybindBtn.TextSize = 10
+    keybindBtn.Font = Enum.Font.GothamBold
+    keybindBtn.Parent = row
+    Instance.new("UICorner", keybindBtn).CornerRadius = UDim.new(0, 4)
+    local ks = Instance.new("UIStroke", keybindBtn)
+    ks.Color = Color3.fromRGB(100, 100, 110)
+    ks.Thickness = 1
+
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, 0, 0, 1)
+    divider.Position = UDim2.new(0, 0, 1, -1)
+    divider.BackgroundColor3 = Color3.fromRGB(18, 28, 38)
+    divider.BorderSizePixel = 0
+    divider.Parent = row
+
+    local function updateToggleVisual()
+        if state[featureKey] then
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+            toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            toggleBtn.Text = "ON"
+        else
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(25, 35, 48)
+            toggleBtn.TextColor3 = Color3.fromRGB(100, 130, 160)
+            toggleBtn.Text = "OFF"
+        end
+    end
+
+    toggleBtn.MouseButton1Click:Connect(function()
+        state[featureKey] = not state[featureKey]
+        updateToggleVisual()
+        if featureKey == "distAura" then
+            setVisualizer(state.distAura)
+            syncVizBtn()
+        end
+    end)
+    keybindBtn.MouseButton1Click:Connect(function()
+        settingKeybind = featureKey
+        keybindBtn.Text = "PRESS A KEY..."
+        keybindBtn.TextColor3 = Color3.fromRGB(255, 200, 0)
+    end)
+
+    return { updateToggle = updateToggleVisual, keybindBtn = keybindBtn }
+end
+
+local function createListInput(label, color, currentList, onChanged)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 80)
+    row.BackgroundColor3 = Color3.fromRGB(12, 16, 22)
+    row.BorderSizePixel = 0
+    row.Parent = content
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop = UDim.new(0, 8)
+    pad.PaddingBottom = UDim.new(0, 8)
+    pad.Parent = row
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0, 16)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = label
+    nameLabel.TextColor3 = color
+    nameLabel.TextSize = 11
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = row
+
+    local hint = Instance.new("TextLabel")
+    hint.Size = UDim2.new(1, 0, 0, 12)
+    hint.Position = UDim2.new(0, 0, 0, 18)
+    hint.BackgroundTransparency = 1
+    hint.Text = "space-separated, partial names ok"
+    hint.TextColor3 = Color3.fromRGB(50, 80, 100)
+    hint.TextSize = 9
+    hint.Font = Enum.Font.Gotham
+    hint.TextXAlignment = Enum.TextXAlignment.Left
+    hint.Parent = row
+
+    local inputBox = Instance.new("TextBox")
+    inputBox.Size = UDim2.new(1, 0, 0, 26)
+    inputBox.Position = UDim2.new(0, 0, 0, 34)
+    inputBox.BackgroundColor3 = Color3.fromRGB(10, 18, 28)
+    inputBox.BorderSizePixel = 0
+    inputBox.Text = table.concat(currentList, " ")
+    inputBox.PlaceholderText = "e.g. bob1 bob2 bob3"
+    inputBox.PlaceholderColor3 = Color3.fromRGB(50, 70, 90)
+    inputBox.TextColor3 = Color3.fromRGB(210, 230, 245)
+    inputBox.TextSize = 11
+    inputBox.Font = Enum.Font.Gotham
+    inputBox.ClearTextOnFocus = false
+    inputBox.Parent = row
+    Instance.new("UICorner", inputBox).CornerRadius = UDim.new(0, 4)
+    local ist = Instance.new("UIStroke", inputBox)
+    ist.Color = color
+    ist.Thickness = 1
+    ist.Transparency = 0.6
+    local ip = Instance.new("UIPadding", inputBox)
+    ip.PaddingLeft = UDim.new(0, 8)
+
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, 0, 0, 1)
+    divider.Position = UDim2.new(0, 0, 1, -1)
+    divider.BackgroundColor3 = Color3.fromRGB(18, 28, 38)
+    divider.BorderSizePixel = 0
+    divider.Parent = row
+
+    inputBox.FocusLost:Connect(function()
+        local words = splitWords(inputBox.Text)
+        onChanged(words)
+        saveConfig()
+        refreshAllHighlights()
+    end)
+
+    return inputBox
+end
+
+local clickBtnRefs = {}
+
+local function createClickToAddRow(clickModeKey, keybindKey, color)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 76)
+    row.BackgroundColor3 = Color3.fromRGB(10, 14, 20)
+    row.BorderSizePixel = 0
+    row.Parent = content
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop = UDim.new(0, 10)
+    pad.Parent = row
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 14)
+    label.BackgroundTransparency = 1
+    label.Text = "CLICK TO ADD — " .. clickModeKey:upper()
+    label.TextColor3 = color
+    label.TextSize = 10
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = row
+
+    local hint = Instance.new("TextLabel")
+    hint.Size = UDim2.new(1, 0, 0, 11)
+    hint.Position = UDim2.new(0, 0, 0, 16)
+    hint.BackgroundTransparency = 1
+    hint.Text = "tap a player's character to add/remove"
+    hint.TextColor3 = Color3.fromRGB(50, 80, 100)
+    hint.TextSize = 9
+    hint.Font = Enum.Font.Gotham
+    hint.TextXAlignment = Enum.TextXAlignment.Left
+    hint.Parent = row
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0.48, -2, 0, 24)
+    toggleBtn.Position = UDim2.new(0, 0, 0, 36)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 30, 42)
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Text = "OFF"
+    toggleBtn.TextColor3 = Color3.fromRGB(100, 130, 160)
+    toggleBtn.TextSize = 10
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.Parent = row
+    Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 4)
+    local ts = Instance.new("UIStroke", toggleBtn)
+    ts.Color = color
+    ts.Thickness = 1
+    ts.Transparency = 0.7
+
+    local kbLabel = keybinds[keybindKey] and ("[" .. keybinds[keybindKey].Name .. "]") or "[NONE]"
+    local keybindBtn = Instance.new("TextButton")
+    keybindBtn.Size = UDim2.new(0.52, -2, 0, 24)
+    keybindBtn.Position = UDim2.new(0.48, 2, 0, 36)
+    keybindBtn.BackgroundColor3 = Color3.fromRGB(10, 20, 32)
+    keybindBtn.BorderSizePixel = 0
+    keybindBtn.Text = "KEY: " .. kbLabel
+    keybindBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+    keybindBtn.TextSize = 10
+    keybindBtn.Font = Enum.Font.GothamBold
+    keybindBtn.Parent = row
+    Instance.new("UICorner", keybindBtn).CornerRadius = UDim.new(0, 4)
+    local ks = Instance.new("UIStroke", keybindBtn)
+    ks.Color = Color3.fromRGB(100, 100, 110)
+    ks.Thickness = 1
+
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, 0, 0, 1)
+    divider.Position = UDim2.new(0, 0, 1, -1)
+    divider.BackgroundColor3 = Color3.fromRGB(18, 28, 38)
+    divider.BorderSizePixel = 0
+    divider.Parent = row
+
+    local isActive = false
+    local function setActive(val)
+        isActive = val
+        if val then
+            local otherKey = clickModeKey == "target" and "friend" or "target"
+            if clickMode == otherKey and clickBtnRefs[otherKey] then
+                clickBtnRefs[otherKey].setActive(false)
+            end
+            clickMode = clickModeKey
+            toggleBtn.BackgroundColor3 = color
+            toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            toggleBtn.Text = "ON"
+        else
+            if clickMode == clickModeKey then clickMode = nil end
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 30, 42)
+            toggleBtn.TextColor3 = Color3.fromRGB(100, 130, 160)
+            toggleBtn.Text = "OFF"
+        end
+    end
+
+    toggleBtn.MouseButton1Click:Connect(function() setActive(not isActive) end)
+    keybindBtn.MouseButton1Click:Connect(function()
+        settingKeybind = keybindKey
+        keybindBtn.Text = "PRESS A KEY..."
+        keybindBtn.TextColor3 = Color3.fromRGB(255, 200, 0)
+    end)
+
+    clickBtnRefs[clickModeKey] = { setActive = setActive, keybindBtn = keybindBtn }
+end
+
+-- =====================
+--   DIST VISUALIZER
+-- =====================
+local function destroyRing()
+    if distRingPart then
+        distRingPart:Destroy()
+        distRingPart = nil
+    end
+end
+
+local function createRing()
+    destroyRing()
+    local part = Instance.new("Part")
+    part.Name = "DistModeRing"
+    part.Shape = Enum.PartType.Cylinder
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanQuery = false
+    part.CastShadow = false
+    part.Transparency = 0.3
+    part.Material = Enum.Material.Neon
+    part.Color = Color3.fromRGB(60, 120, 255)
+    local r = math.max(distModeRadius + 3.5, 5)
+    part.Size = Vector3.new(0.15, r * 2, r * 2)
+    part.Parent = workspace
+    distRingPart = part
+    return part
+end
+
+local function updateRingSize()
+    if distRingPart then
+        local r = math.max(distModeRadius + 3.5, 5)
+        distRingPart.Size = Vector3.new(0.15, r * 2, r * 2)
+    end
+end
+
+local setVisualizer
+local syncVizBtn
+
+setVisualizer = function(on)
+    distVisualizerOn = on
+    if on then
+        createRing()
+    else
+        destroyRing()
+    end
+end
+
+-- =====================
+--   BUILD UI
+-- =====================
+createSectionHeader("— FEATURES —")
+
+rows.killAura = createRow("killAura", "KILL AURA", "Attacks players in FightZone")
+createSlider("MULTIPLIER", 1, 100, 10, true, "x", function(v) killAuraMulti = v end)
+rows.distAura = createRow("distAura", "DIST AURA", "Attack anyone within radius of you")
+createSlider("RADIUS", 1, 100, 10, true, " studs", function(v)
+    distModeRadius = v
+    updateRingSize()
+end)
+
+local vizBtn = nil
+
+do
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 42)
+    row.BackgroundColor3 = Color3.fromRGB(10, 14, 20)
+    row.BorderSizePixel = 0
+    row.Parent = content
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop = UDim.new(0, 8)
+    pad.Parent = row
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 22)
+    btn.BackgroundColor3 = Color3.fromRGB(20, 30, 42)
+    btn.BorderSizePixel = 0
+    btn.Text = "VISUALIZER: OFF"
+    btn.TextColor3 = Color3.fromRGB(100, 130, 160)
+    btn.TextSize = 10
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = row
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    local bs = Instance.new("UIStroke", btn)
+    bs.Color = Color3.fromRGB(60, 120, 255)
+    bs.Thickness = 1
+    bs.Transparency = 0.6
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, 0, 0, 1)
+    divider.Position = UDim2.new(0, 0, 1, -1)
+    divider.BackgroundColor3 = Color3.fromRGB(18, 28, 38)
+    divider.BorderSizePixel = 0
+    divider.Parent = row
+    vizBtn = btn
+
+    syncVizBtn = function()
+        if distVisualizerOn then
+            btn.Text = "VISUALIZER: ON"
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.BackgroundColor3 = Color3.fromRGB(20, 60, 180)
+        else
+            btn.Text = "VISUALIZER: OFF"
+            btn.TextColor3 = Color3.fromRGB(100, 130, 160)
+            btn.BackgroundColor3 = Color3.fromRGB(20, 30, 42)
+        end
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        setVisualizer(not distVisualizerOn)
+        syncVizBtn()
+    end)
+end
+
+rows.autoBlock = createRow("autoBlock", "AUTO BLOCK", "Constantly sends block signal")
+rows.autoBully = createRow("autoBully", "AUTO BULLY", "Re-touches Bully role on respawn")
+rows.deathTP   = createRow("deathTP",   "DEATH TP",   "Teleports back on respawn")
+createSlider("TP DELAY", 0, 2000, 0, true, "ms", function(v) deathTPDelay = v end)
+
+do
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 50)
+    row.BackgroundColor3 = Color3.fromRGB(12, 16, 22)
+    row.BorderSizePixel = 0
+    row.Parent = content
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop = UDim.new(0, 10)
+    pad.Parent = row
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 26)
+    btn.BackgroundColor3 = Color3.fromRGB(160, 20, 20)
+    btn.BorderSizePixel = 0
+    btn.Text = "KILL SELF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 11
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = row
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, 0, 0, 1)
+    divider.Position = UDim2.new(0, 0, 1, -1)
+    divider.BackgroundColor3 = Color3.fromRGB(18, 28, 38)
+    divider.BorderSizePixel = 0
+    divider.Parent = row
+    local function killSelf()
+        local char = localPlayer.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.Health = 0 end
+        end
+    end
+    btn.MouseButton1Click:Connect(killSelf)
+    btn.TouchTap:Connect(killSelf)
+end
+
+rows.hurtReset = createRow("hurtReset", "HURT RESET", "Auto-dies if HP drops below max")
+rows.farmFix   = createRow("farmFix",   "FARM FIX",   "Auto-resets after X sec alive")
+createSlider("RESET TIMER", 1, 10, 1, true, "s", function(v) farmFixDelay = v end)
+
+rows.hitbox = createRow("hitbox", "HITBOX", "Expands enemy HumanoidRootPart size")
+createSlider("HB SIZE", 1, 50, 10, true, "", function(v) hitboxSize = v end)
+
+do
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 42)
+    row.BackgroundColor3 = Color3.fromRGB(10, 14, 20)
+    row.BorderSizePixel = 0
+    row.Parent = content
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingTop = UDim.new(0, 8)
+    pad.Parent = row
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 22)
+    btn.BackgroundColor3 = Color3.fromRGB(20, 30, 42)
+    btn.BorderSizePixel = 0
+    btn.Text = "HB COLOR: RAINBOW"
+    btn.TextColor3 = Color3.fromRGB(210, 210, 210)
+    btn.TextSize = 10
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = row
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    local bs = Instance.new("UIStroke", btn)
+    bs.Color = Color3.fromRGB(200, 100, 255)
+    bs.Thickness = 1
+    bs.Transparency = 0.5
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(1, 0, 0, 1)
+    divider.Position = UDim2.new(0, 0, 1, -1)
+    divider.BackgroundColor3 = Color3.fromRGB(18, 28, 38)
+    divider.BorderSizePixel = 0
+    divider.Parent = row
+    btn.MouseButton1Click:Connect(function()
+        hitboxRainbow = not hitboxRainbow
+        if hitboxRainbow then
+            btn.Text = "HB COLOR: RAINBOW"
+            bs.Color = Color3.fromRGB(200, 100, 255)
+        else
+            btn.Text = "HB COLOR: WHITE"
+            bs.Color = Color3.fromRGB(200, 200, 200)
+        end
+    end)
+end
+
+createSectionHeader("— TARGETING —")
+targetsBox = createListInput(
+    "TARGETS  (only attack these)",
+    Color3.fromRGB(255, 80, 80),
+    targetsList,
+    function(words) targetsList = words end
+)
+createClickToAddRow("target", "clickAddTarget", Color3.fromRGB(255, 80, 80))
+friendsBox = createListInput(
+    "FRIENDS  (never attack these)",
+    Color3.fromRGB(60, 220, 90),
+    friendsList,
+    function(words) friendsList = words end
+)
+createClickToAddRow("friend", "clickAddFriend", Color3.fromRGB(60, 220, 90))
+
+refreshAllHighlights()
+
+-- =====================
+--   CLICK TO ADD HANDLERS
+-- =====================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and clickMode then
+        handleClickAdd(UserInputService:GetMouseLocation())
+    end
+end)
+UserInputService.TouchTap:Connect(function(positions)
+    if not clickMode then return end
+    if #positions > 0 then
+        handleClickAdd(positions[1])
+    end
+end)
+
+-- =====================
+--   INPUT HANDLER
+-- =====================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if settingKeybind then
+        keybinds[settingKeybind] = input.KeyCode
+        local ref = rows[settingKeybind]
+        if ref then
+            ref.keybindBtn.Text = "KEYBIND: [" .. input.KeyCode.Name .. "]"
+            ref.keybindBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+        end
+        local cref = clickBtnRefs[settingKeybind == "clickAddTarget" and "target" or settingKeybind == "clickAddFriend" and "friend" or ""]
+        if cref then
+            cref.keybindBtn.Text = "KEY: [" .. input.KeyCode.Name .. "]"
+            cref.keybindBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+        end
+        settingKeybind = nil
+        saveConfig()
+        return
+    end
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        toggleGui()
+        return
+    end
+    for featureKey, keyCode in pairs(keybinds) do
+        if keyCode and input.KeyCode == keyCode then
+            if featureKey == "clickAddTarget" then
+                local ref = clickBtnRefs["target"]
+                if ref then ref.setActive(clickMode ~= "target") end
+            elseif featureKey == "clickAddFriend" then
+                local ref = clickBtnRefs["friend"]
+                if ref then ref.setActive(clickMode ~= "friend") end
+            elseif state[featureKey] ~= nil then
+                state[featureKey] = not state[featureKey]
+                rows[featureKey].updateToggle()
+                if featureKey == "distAura" then
+                    setVisualizer(state.distAura)
+                    syncVizBtn()
+                end
+            end
+        end
+    end
+end)
+
+-- =====================
+--   FIGHT ZONE CHECK
+-- =====================
+local function isInFightZone(character)
+    local zoneTrigger = workspace:FindFirstChild("Map")
+        and workspace.Map:FindFirstChild("Building")
+        and workspace.Map.Building:FindFirstChild("Building")
+        and workspace.Map.Building.Building:FindFirstChild("FightZone")
+        and workspace.Map.Building.Building.FightZone:FindFirstChild("ZoneTrigger")
+    if not zoneTrigger then return false end
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return false end
+    local rel = character.HumanoidRootPart.Position - zoneTrigger.Position
+    local s = zoneTrigger.Size
+    return math.abs(rel.X) <= s.X/2 and math.abs(rel.Y) <= s.Y/2 and math.abs(rel.Z) <= s.Z/2
+end
+
+-- =====================
+--   SHOULD ATTACK
+-- =====================
+local function shouldAttack(player)
+    if isFriend(player) then return false end
+    if #targetsList > 0 then return isTarget(player) end
+    return true
+end
+
+-- =====================
+--   DEATH TP
+-- =====================
+localPlayer.CharacterAdded:Connect(function(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+
+    lastDeathTime = tick()
+
+    humanoid.Died:Connect(function()
+        if state.deathTP then
+            deathPosition = rootPart.Position
+        end
+    end)
+
+    if state.autoBully then
+        rootPart.CFrame = workspace.Map.Functional.Roles.Bully.CFrame
+        task.wait(0.1)
+    end
+
+    if state.deathTP and deathPosition then
+        if deathTPDelay > 0 then
+            task.delay(deathTPDelay / 1000, function()
+                if rootPart and rootPart.Parent then
+                    rootPart.CFrame = CFrame.new(deathPosition)
+                end
+            end)
+        else
+            rootPart.CFrame = CFrame.new(deathPosition)
+        end
+    end
+end)
+
+if localPlayer.Character then
+    local character = localPlayer.Character
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if humanoid and rootPart then
+        humanoid.Died:Connect(function()
+            if state.deathTP then
+                deathPosition = rootPart.Position
+            end
+        end)
+    end
+end
+
+-- =====================
+--   MAIN LOOP
+-- =====================
+RunService.Heartbeat:Connect(function()
+    local character = localPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    local myHumanoid = character:FindFirstChildOfClass("Humanoid")
+    if not myHumanoid or myHumanoid.Health <= 0 then return end
+
+    if distVisualizerOn and distRingPart then
+        distRingPart.CFrame = CFrame.new(rootPart.Position.X, rootPart.Position.Y - 2.5, rootPart.Position.Z)
+            * CFrame.Angles(0, 0, math.pi / 2)
+    end
+
+    if state.killAura then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer then
+                local targetChar = player.Character
+                if targetChar then
+                    local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
+                    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+                    if targetHumanoid
+                    and targetRoot
+                    and targetHumanoid.Health > 0
+                    and targetHumanoid:GetState() ~= Enum.HumanoidStateType.Dead
+                    and player.Character == targetChar
+                    and isInFightZone(targetChar)
+                    and shouldAttack(player) then
+                        for _ = 1, killAuraMulti do
+                            ReplicatedStorage.FightHandler.PunchEvent:FireServer(unpack({
+                                [1] = { ["Frame"] = rootPart.CFrame, ["Params"] = nil, ["Size"] = Vector3.new(7,7,7) },
+                                [2] = { [1] = targetChar },
+                                [3] = true
+                            }))
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if state.distAura then
+        local effectiveRadius = math.max(distModeRadius + 3.5, 5)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer then
+                local targetChar = player.Character
+                if targetChar then
+                    local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
+                    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+                    if targetHumanoid
+                    and targetRoot
+                    and targetHumanoid.Health > 0
+                    and targetHumanoid:GetState() ~= Enum.HumanoidStateType.Dead
+                    and player.Character == targetChar
+                    and isInFightZone(targetChar)
+                    and shouldAttack(player)
+                    and (targetRoot.Position - rootPart.Position).Magnitude <= effectiveRadius then
+                        for _ = 1, killAuraMulti do
+                            ReplicatedStorage.FightHandler.PunchEvent:FireServer(unpack({
+                                [1] = { ["Frame"] = rootPart.CFrame, ["Params"] = nil, ["Size"] = Vector3.new(7,7,7) },
+                                [2] = { [1] = targetChar },
+                                [3] = true
+                            }))
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if state.autoBlock then
+        ReplicatedStorage.FightHandler.Block:FireServer(true)
+    end
+
+    if state.hurtReset then
+        if myHumanoid.Health < myHumanoid.MaxHealth then
+            myHumanoid.Health = 0
+        end
+    end
+
+    if state.farmFix then
+        if (tick() - lastDeathTime) >= farmFixDelay then
+            myHumanoid.Health = 0
+        end
+    end
+
+    if state.hitbox then
+        rainbowHue = (rainbowHue + 0.005) % 1
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer and not isFriend(player) then
+                local targetChar = player.Character
+                if targetChar then
+                    local hrp = targetChar:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        if isInFightZone(targetChar) and (#targetsList == 0 or isTarget(player)) then
+                            pcall(function()
+                                hrp.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+                                hrp.Transparency = 0.90
+                                hrp.Color = hitboxRainbow
+                                    and Color3.fromHSV(rainbowHue, 1, 1)
+                                    or Color3.fromRGB(255, 255, 255)
+                                hrp.Material = Enum.Material.Neon
+                                hrp.CanCollide = false
+                            end)
+                        else
+                            pcall(function()
+                                hrp.Size = Vector3.new(2, 2, 1)
+                                hrp.Transparency = 1
+                                hrp.Material = Enum.Material.SmoothPlastic
+                                hrp.CanCollide = false
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+print("✅ Exploit GUI loaded! Left CTRL to toggle visibility.")
