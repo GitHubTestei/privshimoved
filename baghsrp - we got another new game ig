@@ -94,43 +94,18 @@ local Keybinds = {
 
 local ScriptUnloaded = false
 
-local Remotes, UpdateBio, UpdateBioColor, UpdateRPColor
-pcall(function()
-    Remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
-    if Remotes then
-        UpdateBio = Remotes:WaitForChild("UpdateBio", 5)
-        UpdateBioColor = Remotes:WaitForChild("UpdateBioColor", 5)
-        UpdateRPColor = Remotes:WaitForChild("UpdateRPColor", 5)
-    end
-end)
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local UpdateBio = Remotes:WaitForChild("UpdateBio")
+local UpdateBioColor = Remotes:WaitForChild("UpdateBioColor")
+local UpdateRPColor = Remotes:WaitForChild("UpdateRPColor")
 
 local rainbowConnection = nil
 local bioSet = false
 
--- ============================================================
--- GUI PARENT HELPER — tries CoreGui first, falls back to PlayerGui
--- ============================================================
-local _guiParent = nil
-local function getGuiParent()
-    if _guiParent then return _guiParent end
-    local ok = pcall(function()
-        local test = Instance.new("ScreenGui")
-        test.Parent = CoreGui
-        test:Destroy()
-    end)
-    if ok then
-        _guiParent = CoreGui
-    else
-        _guiParent = LocalPlayer:WaitForChild("PlayerGui")
-    end
-    return _guiParent
-end
-
 local function startRainbow()
     if rainbowConnection then return end
-    if not UpdateBio or not UpdateBioColor or not UpdateRPColor then return end
     if not bioSet then
-        pcall(function() UpdateBio:FireServer("") end)
+        UpdateBio:FireServer("")
         bioSet = true
     end
     local accumulatedBio = 0
@@ -144,8 +119,8 @@ local function startRainbow()
         local pastelBio = Color3.fromHSV(hueBio, 0.65, 0.98)
         local hueRP = accumulatedRP % 1
         local pastelRP = Color3.fromHSV(hueRP, 0.65, 0.98)
-        pcall(function() UpdateBioColor:FireServer(pastelBio) end)
-        pcall(function() UpdateRPColor:FireServer(pastelRP) end)
+        UpdateBioColor:FireServer(pastelBio)
+        UpdateRPColor:FireServer(pastelRP)
     end)
 end
 
@@ -199,7 +174,7 @@ local function createNametag(player, char)
     billboard.AlwaysOnTop = true
     billboard.MaxDistance = 200
     billboard.Adornee = hrp
-    billboard.Parent = getGuiParent()  -- FIXED: was CoreGui
+    billboard.Parent = CoreGui
     local bg = Instance.new("Frame")
     bg.Size = UDim2.new(1, 0, 1, 0)
     bg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
@@ -254,7 +229,7 @@ local function createTargetNametag(player, char)
     billboard.AlwaysOnTop = true
     billboard.MaxDistance = 200
     billboard.Adornee = hrp
-    billboard.Parent = getGuiParent()  -- FIXED: was CoreGui
+    billboard.Parent = CoreGui
     local bg = Instance.new("Frame")
     bg.Size = UDim2.new(1, 0, 1, 0)
     bg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
@@ -553,7 +528,7 @@ local function stopSpamGrab()
     spamGrabThread = nil
 end
 
--- GRAB TARGET
+-- GRAB TARGET (cycles through TargetNamesList each call)
 local GrabRF = nil
 local grabTargetIndex = 1
 task.spawn(function()
@@ -563,14 +538,21 @@ task.spawn(function()
     end)
 end)
 
+local _arc_ignoreVelocity = false
+
 local function doGrabTarget()
     if #TargetNamesList == 0 then return end
+
+    -- cycle index
     if grabTargetIndex > #TargetNamesList then grabTargetIndex = 1 end
     local search = TargetNamesList[grabTargetIndex]
     grabTargetIndex = grabTargetIndex + 1
+
     local myChar = LocalPlayer.Character
     local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myHRP then return end
+
+    -- find the target player
     local targetPlayer = nil
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
@@ -583,108 +565,57 @@ local function doGrabTarget()
     if not targetPlayer or not targetPlayer.Character then return end
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return end
+
     local originalCFrame = myHRP.CFrame
+
+    -- suppress arc velocity tracking so the tp doesn't look like a grab hit
+    _arc_ignoreVelocity = true
+
+    -- tp directly to target
     myHRP.CFrame = targetHRP.CFrame
+
     task.wait()
     pcall(function() GrabRF:InvokeServer() end)
     task.wait(0.1)
+
     myHRP.CFrame = originalCFrame
+
+    -- Wait until we're back on the ground (in case the grabber jumped with us),
+    -- then wait an extra 0.5s settling period before re-enabling velocity tracking.
+    task.spawn(function()
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            -- poll until grounded (Running/Idle) or timeout after 5s
+            local timeout = tick() + 5
+            while tick() < timeout do
+                local state = hum:GetState()
+                if state == Enum.HumanoidStateType.Running
+                    or state == Enum.HumanoidStateType.RunningNoPhysics
+                    or state == Enum.HumanoidStateType.Landed
+                    or state == Enum.HumanoidStateType.None then
+                    break
+                end
+                task.wait(0.05)
+            end
+        end
+        task.wait(0.5)
+        _arc_ignoreVelocity = false
+    end)
 end
 
 -- ANTI RAG COMBO
 local _arc_targetCFrame = CFrame.new(-502.844818, 10.1868954, -65.4427567, 0.560596228, 2.67291544e-09, -0.828089297, -2.95736768e-08, 1, -1.67928462e-08, 0.828089297, 3.39036497e-08, 0.560596228)
 local _arc_safeCFrame   = _arc_targetCFrame + Vector3.new(0, 1, 0)
 
-local ArcDefaultDelay = 0.1
-local ArcGrabDelay    = 3.5
-
 local _arc_connection              = nil
-local _arc_platStandConn           = nil
 local _arc_originalCFrame          = nil
+local _arc_originalCameraCFrame    = nil
+local _arc_delay_time              = nil
 local _arc_hasCleanedThisRagdoll   = false
 local _arc_returnTask              = nil
-local _arc_inReturnWindow          = false
-local _arc_wasGrabbed              = false
-
-local _arc_platform = nil       -- holds the Model containing all box parts
-local _arc_platformStandConn = nil
-
-local function _arc_removePlatform()
-    if _arc_platformStandConn then
-        _arc_platformStandConn:Disconnect()
-        _arc_platformStandConn = nil
-    end
-    if _arc_platform then
-        pcall(function() _arc_platform:Destroy() end)
-        _arc_platform = nil
-    end
-end
-
-local function _arc_spawnPlatform(position)
-    _arc_removePlatform()
-
-    -- Box dimensions
-    local W, H, D = 16, 10, 16   -- interior width, height, depth
-    local T = 1                   -- wall/floor/ceiling thickness
-
-    -- Floor top-face sits at (position.Y - 3.5) so player lands on it
-    local floorY  = position.Y - 3.5
-    local floorCY = floorY - T / 2
-    local ceilCY  = floorY + H + T / 2
-    local innerCY = floorY + H / 2
-
-    local model = Instance.new("Model")
-    model.Name = "ARC_SafeBox"
-    model.Parent = workspace
-    _arc_platform = model
-
-    local function makePart(size, cf)
-        local p = Instance.new("Part")
-        p.Size = size
-        p.CFrame = cf
-        p.Anchored = true
-        p.CanCollide = true
-        p.Locked = true
-        p.Material = Enum.Material.SmoothPlastic
-        p.BrickColor = BrickColor.new("Medium stone grey")
-        p.Transparency = 0.4
-        p.Parent = model
-        return p
-    end
-
-    local cx, cz = position.X, position.Z
-
-    -- Floor
-    makePart(Vector3.new(W, T, D),         CFrame.new(cx, floorCY,           cz))
-    -- Ceiling
-    makePart(Vector3.new(W, T, D),         CFrame.new(cx, ceilCY,            cz))
-    -- Front wall  (+Z)
-    makePart(Vector3.new(W, H + T*2, T),   CFrame.new(cx, innerCY,           cz + D/2 + T/2))
-    -- Back wall   (-Z)
-    makePart(Vector3.new(W, H + T*2, T),   CFrame.new(cx, innerCY,           cz - D/2 - T/2))
-    -- Left wall   (-X)
-    makePart(Vector3.new(T, H + T*2, D),   CFrame.new(cx - W/2 - T/2, innerCY, cz))
-    -- Right wall  (+X)
-    makePart(Vector3.new(T, H + T*2, D),   CFrame.new(cx + W/2 + T/2, innerCY, cz))
-
-    local platformTopY = floorY
-    _arc_platformStandConn = RunService.Heartbeat:Connect(function()
-        if not _arc_platform or not _arc_platform.Parent then
-            _arc_removePlatform()
-            return
-        end
-        local char = LocalPlayer.Character
-        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp and hrp.Parent then
-            if hrp.Position.Y < platformTopY then
-                hrp.CFrame = CFrame.new(cx, platformTopY + 3.5, cz)
-                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-            end
-        end
-    end)
-
-    return model
-end
+local _arc_last_zero_to_nonzero    = nil
+local _arc_was_zero_velocity       = false
 
 local function _arc_countDisabledMotors(char)
     if not char then return 0, 0 end
@@ -726,58 +657,22 @@ local function _arc_forceEndRagdoll(char)
     end
 end
 
-local function _arc_doReturn(hrp, savedCFrame)
-    if hrp and hrp.Parent then
-        local safePos = _arc_safeCFrame.Position
-        _arc_spawnPlatform(safePos)
-        hrp.CFrame = CFrame.new(safePos.X, safePos.Y, safePos.Z)
-        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-    end
-    _arc_returnTask = task.delay(ArcGrabDelay, function()
-        _arc_removePlatform()
-        if hrp and hrp.Parent and savedCFrame then
-            hrp.CFrame = savedCFrame
-            task.delay(0.05, function()
-                if hrp and hrp.Parent then
-                    hrp.AssemblyLinearVelocity = Vector3.new(0, -1, 0)
-                end
-            end)
-        end
-        _arc_originalCFrame        = nil
-        _arc_returnTask            = nil
-        _arc_hasCleanedThisRagdoll = false
-        _arc_inReturnWindow        = false
-        _arc_wasGrabbed            = false
-    end)
-end
-
 local function _arc_onCharacterAdded(char)
     local hrp = char:WaitForChild("HumanoidRootPart", 10)
     if not hrp then return end
-    local hum = char:WaitForChild("Humanoid", 10)
-    if not hum then return end
 
     if _arc_connection then _arc_connection:Disconnect() _arc_connection = nil end
-    if _arc_platStandConn then _arc_platStandConn:Disconnect() _arc_platStandConn = nil end
     _arc_originalCFrame        = nil
+    _arc_originalCameraCFrame  = nil
+    _arc_delay_time            = nil
     _arc_hasCleanedThisRagdoll = false
-    _arc_inReturnWindow        = false
-    _arc_wasGrabbed            = false
     if _arc_returnTask then task.cancel(_arc_returnTask) _arc_returnTask = nil end
+    _arc_last_zero_to_nonzero  = nil
+    _arc_was_zero_velocity     = false
 
     task.wait(2.5)
 
     if not AntiRagComboEnabled then return end
-
-    _arc_platStandConn = hum:GetPropertyChangedSignal("PlatformStand"):Connect(function()
-        if not AntiRagComboEnabled or _arc_inReturnWindow then return end
-        if hum.PlatformStand then
-            _arc_wasGrabbed = true
-            if not _arc_originalCFrame then
-                _arc_originalCFrame = hrp.CFrame
-            end
-        end
-    end)
 
     _arc_connection = RunService.Heartbeat:Connect(function()
         if not AntiRagComboEnabled then return end
@@ -786,7 +681,21 @@ local function _arc_onCharacterAdded(char)
             return
         end
 
-        if _arc_inReturnWindow then return end
+        local hrp_vel     = hrp.AssemblyLinearVelocity
+        local mag         = hrp_vel.Magnitude
+        local y_vel       = hrp_vel.Y
+        local is_zero_vel = (mag < 1e-6) and (math.abs(y_vel) < 1e-6)
+
+        -- FIX: velocity tracking always runs so zero->nonzero transitions are
+        -- never missed. _arc_ignoreVelocity only suppresses the timestamp update,
+        -- meaning a grab-tp won't falsely trigger the 3.5s delay, but real
+        -- ragdoll-throws still will.
+        if _arc_was_zero_velocity and not is_zero_vel then
+            if not _arc_ignoreVelocity then
+                _arc_last_zero_to_nonzero = tick()
+            end
+        end
+        _arc_was_zero_velocity = is_zero_vel
 
         local total, disabled = _arc_countDisabledMotors(char)
         local isRagdolled     = total >= 12 and (disabled / total) >= 0.9
@@ -794,49 +703,42 @@ local function _arc_onCharacterAdded(char)
         if isRagdolled then
             if not _arc_originalCFrame then
                 _arc_originalCFrame = hrp.CFrame
+                _arc_originalCameraCFrame = Camera.CFrame
+                local now = tick()
+                _arc_delay_time = 0.1
+                if _arc_last_zero_to_nonzero and (now - _arc_last_zero_to_nonzero) < 1 then
+                    _arc_delay_time = 3.5
+                end
             end
 
-            if _arc_wasGrabbed then
-                if not _arc_hasCleanedThisRagdoll then
-                    _arc_forceEndRagdoll(char)
-                    _arc_hasCleanedThisRagdoll = true
-                end
-                if not _arc_returnTask then
-                    _arc_inReturnWindow = true
-                    local savedCFrame = _arc_originalCFrame
-                    _arc_doReturn(hrp, savedCFrame)
-                end
-            else
-                hrp.CFrame = _arc_safeCFrame
+            hrp.CFrame = _arc_safeCFrame
 
-                if not _arc_hasCleanedThisRagdoll then
-                    _arc_forceEndRagdoll(char)
-                    _arc_hasCleanedThisRagdoll = true
-                end
+            if not _arc_hasCleanedThisRagdoll then
+                _arc_forceEndRagdoll(char)
+                _arc_hasCleanedThisRagdoll = true
             end
         else
-            if not _arc_wasGrabbed and _arc_originalCFrame and not _arc_returnTask then
-                _arc_inReturnWindow = true
-                local savedCFrame = _arc_originalCFrame
-                _arc_returnTask = task.delay(ArcDefaultDelay, function()
-                    if hrp and hrp.Parent and savedCFrame then
-                        hrp.CFrame = savedCFrame
+            if _arc_originalCFrame and not _arc_returnTask then
+                _arc_returnTask = task.delay(_arc_delay_time, function()
+                    if hrp and hrp.Parent and _arc_originalCFrame then
+                        hrp.CFrame = _arc_originalCFrame
+                        if _arc_originalCameraCFrame then
+                            Camera.CFrame = _arc_originalCameraCFrame
+                        end
                         task.delay(0.05, function()
                             if hrp and hrp.Parent then
                                 hrp.AssemblyLinearVelocity = Vector3.new(0, -1, 0)
                             end
                         end)
                     end
-                    _arc_originalCFrame        = nil
-                    _arc_returnTask            = nil
-                    _arc_hasCleanedThisRagdoll = false
-                    _arc_inReturnWindow        = false
-                    _arc_wasGrabbed            = false
+                    _arc_originalCFrame       = nil
+                    _arc_originalCameraCFrame = nil
+                    _arc_delay_time           = nil
+                    _arc_returnTask           = nil
                 end)
             end
-            if not _arc_wasGrabbed then
-                _arc_hasCleanedThisRagdoll = false
-            end
+
+            _arc_hasCleanedThisRagdoll = false
         end
     end)
 end
@@ -853,19 +755,16 @@ local function stopAntiRagCombo()
         _arc_connection:Disconnect()
         _arc_connection = nil
     end
-    if _arc_platStandConn then
-        _arc_platStandConn:Disconnect()
-        _arc_platStandConn = nil
-    end
     if _arc_returnTask then
         task.cancel(_arc_returnTask)
         _arc_returnTask = nil
     end
-    _arc_removePlatform()
     _arc_originalCFrame        = nil
+    _arc_originalCameraCFrame  = nil
+    _arc_delay_time            = nil
     _arc_hasCleanedThisRagdoll = false
-    _arc_inReturnWindow        = false
-    _arc_wasGrabbed            = false
+    _arc_last_zero_to_nonzero  = nil
+    _arc_was_zero_velocity     = false
 end
 
 LocalPlayer.CharacterAdded:Connect(function(char)
@@ -908,8 +807,6 @@ local function getConfig()
             TeleportAuraHeightMin = TeleportAuraHeightMin,
             TeleportAuraHeightMax = TeleportAuraHeightMax,
             TeleportAuraDelay = TeleportAuraDelay,
-            ArcDefaultDelay = ArcDefaultDelay,
-            ArcGrabDelay = ArcGrabDelay,
         },
         friends = table.concat(FriendsNamesList, " "),
         targets = table.concat(TargetNamesList, " "),
@@ -948,6 +845,7 @@ end
 
 loadFile()
 
+-- After GUI is fully built, call this to sync keybind button displays
 local function refreshKeybindDisplays()
     for k, keyCode in pairs(Keybinds) do
         if keyCode and ToggleCallbacks[k] and ToggleCallbacks[k].setKeybind then
@@ -956,6 +854,7 @@ local function refreshKeybindDisplays()
     end
 end
 
+-- These will be set after GUI is built so toggles can be applied
 local ToggleSetters = {}
 local SliderSetters = {}
 local friendsTextRef = nil
@@ -964,17 +863,20 @@ local strafeTargetBoxRef = nil
 
 local function applyConfig(cfg)
     if not cfg then return end
+    -- apply sliders
     if cfg.sliders then
         for k, v in pairs(cfg.sliders) do
             if SliderSetters[k] then SliderSetters[k](v) end
         end
     end
+    -- apply friends/targets text
     if cfg.friends and friendsTextRef then friendsTextRef.Text = cfg.friends end
     if cfg.targets and targetTextRef then targetTextRef.Text = cfg.targets end
     if cfg.strafeTarget and strafeTargetBoxRef then
         strafeTargetBoxRef.Text = cfg.strafeTarget
         TargetStrafeTargetName = cfg.strafeTarget
     end
+    -- apply keybinds
     if cfg.keybinds then
         for k, vName in pairs(cfg.keybinds) do
             if vName and type(vName) == "string" then
@@ -987,23 +889,22 @@ local function applyConfig(cfg)
             end
         end
     end
+    -- apply toggles last so they use correct slider values
     if cfg.toggles then
         for k, v in pairs(cfg.toggles) do
             if ToggleSetters[k] then ToggleSetters[k](v) end
         end
     end
+    -- refresh all keybind button displays now that ToggleCallbacks is populated
     refreshKeybindDisplays()
 end
 
--- ============================================================
 -- GUI
--- ============================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "FXCKER"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
--- FIXED: use getGuiParent() instead of hardcoded CoreGui
-ScreenGui.Parent = getGuiParent()
+ScreenGui.Parent = CoreGui
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "Main"
@@ -1012,6 +913,7 @@ MainFrame.Position = UDim2.new(0.5, -160, 0.5, -330)
 MainFrame.BackgroundColor3 = Color3.fromRGB(8, 8, 14)
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
+MainFrame.Visible = true
 MainFrame.Parent = ScreenGui
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
 
@@ -1024,7 +926,6 @@ ToggleButton.TextColor3 = Color3.fromRGB(200, 100, 255)
 ToggleButton.Font = Enum.Font.GothamBold
 ToggleButton.TextSize = 16
 ToggleButton.ZIndex = 10
--- FIXED: ToggleButton also goes into the same gui parent
 ToggleButton.Parent = ScreenGui
 Instance.new("UICorner", ToggleButton).CornerRadius = UDim.new(1, 0)
 local tbStroke = Instance.new("UIStroke", ToggleButton)
@@ -1172,9 +1073,11 @@ local function createToggle(text, parent, callback, order, keybindKey)
                 bindBtn.Text = keyCode and keyCode.Name or "None"
             end
         }
+        -- expose setter for config load
         ToggleSetters[keybindKey .. "Enabled"] = function(state)
             if state ~= enabled then setEnabled(state) end
         end
+        -- also expose by raw name for toggles without keybind suffix match
         ToggleSetters[text:gsub(" ", "") .. "Enabled"] = function(state)
             if state ~= enabled then setEnabled(state) end
         end
@@ -1311,135 +1214,6 @@ local function createSlider(text, min, max, default, parent, callback, order)
     end)
 
     return sliderFrame, setValue
-end
-
-local function createDecimalSlider(text, minVal, maxVal, defaultVal, parent, callback, order)
-    local SCALE = 10
-    local minI    = math.round(minVal    * SCALE)
-    local maxI    = math.round(maxVal    * SCALE)
-    local defaultI = math.round(defaultVal * SCALE)
-
-    local sliderFrame = Instance.new("Frame")
-    sliderFrame.Size = UDim2.new(1, 0, 0, 44)
-    sliderFrame.BackgroundTransparency = 1
-    sliderFrame.LayoutOrder = order
-    sliderFrame.ZIndex = 3
-    sliderFrame.Parent = parent
-
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -45, 0, 20)
-    label.Position = UDim2.new(0, 4, 0, 0)
-    label.BackgroundTransparency = 1
-    label.TextColor3 = Color3.fromRGB(200, 200, 200)
-    label.Font = Enum.Font.GothamSemibold
-    label.TextSize = 13
-    label.Text = text
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.ZIndex = 4
-    label.Parent = sliderFrame
-
-    local valueLabel = Instance.new("TextLabel")
-    valueLabel.Size = UDim2.new(0, 40, 0, 20)
-    valueLabel.Position = UDim2.new(1, -44, 0, 0)
-    valueLabel.BackgroundTransparency = 1
-    valueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    valueLabel.Font = Enum.Font.GothamBold
-    valueLabel.TextSize = 13
-    valueLabel.Text = tostring(defaultVal)
-    valueLabel.ZIndex = 4
-    valueLabel.Parent = sliderFrame
-
-    local sliderHitArea = Instance.new("TextButton")
-    sliderHitArea.Size = UDim2.new(1, -10, 0, 30)
-    sliderHitArea.Position = UDim2.new(0, 5, 0, 14)
-    sliderHitArea.BackgroundTransparency = 1
-    sliderHitArea.Text = ""
-    sliderHitArea.ZIndex = 3
-    sliderHitArea.Parent = sliderFrame
-
-    local sliderBg = Instance.new("Frame")
-    sliderBg.Size = UDim2.new(1, 0, 0, 6)
-    sliderBg.Position = UDim2.new(0, 0, 0.5, -3)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    sliderBg.ZIndex = 3
-    sliderBg.Parent = sliderHitArea
-    Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(0, 3)
-
-    local initPos = (defaultI - minI) / (maxI - minI)
-    local sliderFill = Instance.new("Frame")
-    sliderFill.Size = UDim2.new(initPos, 0, 1, 0)
-    sliderFill.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
-    sliderFill.ZIndex = 4
-    sliderFill.Parent = sliderBg
-    Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(0, 3)
-
-    local sliderBtn = Instance.new("TextButton")
-    sliderBtn.Size = UDim2.new(0, 28, 0, 28)
-    sliderBtn.Position = UDim2.new(initPos, -14, 0.5, -14)
-    sliderBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    sliderBtn.Text = ""
-    sliderBtn.ZIndex = 5
-    sliderBtn.Parent = sliderBg
-    Instance.new("UICorner", sliderBtn).CornerRadius = UDim.new(1, 0)
-
-    local function formatVal(intVal)
-        local real = intVal / SCALE
-        return string.format("%.1f", real)
-    end
-
-    local function setValue(intVal)
-        intVal = math.clamp(math.floor(intVal + 0.5), minI, maxI)
-        local pos = (intVal - minI) / (maxI - minI)
-        sliderFill.Size = UDim2.new(pos, 0, 1, 0)
-        sliderBtn.Position = UDim2.new(pos, -14, 0.5, -14)
-        valueLabel.Text = formatVal(intVal)
-        callback(intVal / SCALE)
-    end
-
-    local function handleSliderInput(inputPos)
-        local pos = math.clamp(
-            (inputPos.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X,
-            0, 1
-        )
-        setValue(minI + (maxI - minI) * pos)
-    end
-
-    local slider_dragging = false
-
-    sliderBtn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            slider_dragging = true
-        end
-    end)
-    sliderHitArea.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            slider_dragging = true
-            handleSliderInput(input.Position)
-        end
-    end)
-    sliderBg.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            slider_dragging = true
-            handleSliderInput(input.Position)
-        end
-    end)
-
-    safeConnect(UserInputService.InputEnded, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            slider_dragging = false
-        end
-    end)
-    safeConnect(UserInputService.InputChanged, function(input)
-        if slider_dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            handleSliderInput(input.Position)
-        end
-    end)
-
-    local function setValueReal(realVal)
-        setValue(math.round(realVal * SCALE))
-    end
-
-    return sliderFrame, setValueReal
 end
 
 -- SECTIONS
@@ -1762,16 +1536,13 @@ createToggle("Silent AutoBlock Enabled", SilentAutoBlockSection, function(state)
 end, 1, "SilentAutoBlock")
 
 local AntiRagComboSection = createSection("Anti Rag Combo", 10)
-AntiRagComboSection.Size = UDim2.new(0.94, 0, 0, 155)
+AntiRagComboSection.Size = UDim2.new(0.94, 0, 0, 60)
 createToggle("Anti Rag Combo Enabled", AntiRagComboSection, function(state)
     AntiRagComboEnabled = state
     if state then startAntiRagCombo() else stopAntiRagCombo() end
 end, 1, "AntiRagCombo")
-local _, setArcDefaultDelay = createDecimalSlider("Default Delay (s)", 0.1, 1.0, 0.1, AntiRagComboSection, function(v) ArcDefaultDelay = v end, 2)
-local _, setArcGrabDelay    = createDecimalSlider("Grab Delay (s)",    1.0, 10.0, 3.5, AntiRagComboSection, function(v) ArcGrabDelay = v end, 3)
-SliderSetters["ArcDefaultDelay"] = setArcDefaultDelay
-SliderSetters["ArcGrabDelay"]    = setArcGrabDelay
 
+-- SPAM GRAB SECTION
 local SpamGrabSection = createSection("Spam Grab", 11)
 SpamGrabSection.Size = UDim2.new(0.94, 0, 0, 60)
 createToggle("Spam Grab Enabled", SpamGrabSection, function(state)
@@ -2031,7 +1802,6 @@ game:BindToClose(function()
     stopAntiRagCombo()
     stopSpamGrab()
     if _arc_returnTask then task.cancel(_arc_returnTask) end
-    _arc_removePlatform()
     for _, tag in pairs(FriendNametags) do pcall(function() tag:Destroy() end) end
     for _, tag in pairs(TargetNametags) do pcall(function() tag:Destroy() end) end
 end)
