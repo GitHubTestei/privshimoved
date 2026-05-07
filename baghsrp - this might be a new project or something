@@ -1,5 +1,5 @@
 -- RB Combat Suite: Friend Edition (V2)
--- Reverted Anti-Rag | White Friend Highlights | Reliable Auto-Save
+-- Reverted Anti-Rag | White Friend Highlights | Black Target Highlights | Reliable Auto-Save
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -10,6 +10,7 @@ local LogService        = game:GetService("LogService")
 
 local LocalPlayer = Players.LocalPlayer
 local FRIEND_COLOR = Color3.fromRGB(255, 255, 255)
+local TARGET_COLOR = Color3.fromRGB(0, 0, 0)
 
 local rainbowPhase = 0
 local function getAccent()
@@ -20,13 +21,20 @@ local Features = {
     KillAura   = true,
     AutoBlock  = true,
     AntiRag    = true,
-    Friends    = ""
+    DeathTP    = true,
+    GrabSpam   = true,
+    Reset      = false,
+    Friends    = "",
+    Targets    = ""
 }
 
 local Keybinds = {
     KillAura  = nil,
     AutoBlock = nil,
     AntiRag   = nil,
+    DeathTP   = nil,
+    GrabSpam  = nil,
+    Reset     = nil,
 }
 
 local bindingFor = nil
@@ -49,10 +57,26 @@ local function LoadFriends()
     return ""
 end
 
+local function SaveTargets(str)
+    print("VOID_SAVE_TARGETS:" .. str)
+end
+
+local function LoadTargets()
+    local logs = LogService:GetLogHistory()
+    for i = #logs, 1, -1 do
+        local msg = logs[i].message
+        if msg:find("VOID_SAVE_TARGETS:") then
+            return msg:split("VOID_SAVE_TARGETS:")[2]
+        end
+    end
+    return ""
+end
+
 Features.Friends = LoadFriends()
+Features.Targets = LoadTargets()
 
 -- ────────────────────────────────────────────────
---  FRIEND CHECK
+--  FRIEND / TARGET CHECK
 -- ────────────────────────────────────────────────
 local function IsWhitelisted(plr)
     if Features.Friends == "" then return false end
@@ -67,72 +91,55 @@ local function IsWhitelisted(plr)
     return false
 end
 
+local function IsTargeted(plr)
+    if Features.Targets == "" then return false end
+    local names = string.split(string.lower(Features.Targets), " ")
+    local targetUser = string.lower(plr.Name)
+    local targetDisplay = string.lower(plr.DisplayName)
+    for _, name in pairs(names) do
+        if name ~= "" and (targetUser:find(name) or targetDisplay:find(name)) then
+            return true
+        end
+    end
+    return false
+end
+
+local function HasTargets()
+    if Features.Targets == "" then return false end
+    for _, name in pairs(string.split(Features.Targets, " ")) do
+        if name ~= "" then return true end
+    end
+    return false
+end
+
 -- ────────────────────────────────────────────────
 --  REMOTES & HIGHLIGHTS
 -- ────────────────────────────────────────────────
 local CombatRF = ReplicatedStorage:WaitForChild("OldPackages", 8):WaitForChild("Knit", 5):WaitForChild("Services", 5):WaitForChild("CombatService", 5):WaitForChild("RF", 5)
 local HitRF, BlockRF = CombatRF:WaitForChild("Hit", 5), CombatRF:WaitForChild("Block", 5)
+local GrabRF = CombatRF:WaitForChild("Grab", 5)
 
 local friendHighlights = {}
-local targetHighlight = nil
-local tracerBeam = nil
-local tracerAtt0 = nil
-local tracerAtt1 = nil
+local targetHighlights = {}
+local currentTargetHighlight = nil
 
 local function UpdateVisuals(currentTarget)
     local pulse = 0.4 + ((math.sin(tick() * 10) + 1) / 2 * 0.3)
 
     if currentTarget and Features.KillAura then
-
-        if not targetHighlight or targetHighlight.Adornee ~= currentTarget then
-            if targetHighlight then targetHighlight:Destroy() end
-            targetHighlight = Instance.new("Highlight")
-            targetHighlight.FillColor = getAccent()
-            targetHighlight.OutlineColor = Color3.new(1,1,1)
-            targetHighlight.Adornee = currentTarget
-            targetHighlight.Parent = currentTarget
-
-            if tracerBeam then tracerBeam:Destroy() tracerBeam = nil end
-            if tracerAtt0 then tracerAtt0:Destroy() tracerAtt0 = nil end
-            if tracerAtt1 then tracerAtt1:Destroy() tracerAtt1 = nil end
-
-            local char = LocalPlayer.Character
-            local localRoot = char and char:FindFirstChild("HumanoidRootPart")
-            local targetRoot = currentTarget:FindFirstChild("HumanoidRootPart")
-            if localRoot and targetRoot then
-                tracerAtt0 = Instance.new("Attachment", localRoot)
-                tracerAtt1 = Instance.new("Attachment", targetRoot)
-                tracerBeam = Instance.new("Beam", workspace.Terrain)
-                tracerBeam.Attachment0 = tracerAtt0
-                tracerBeam.Attachment1 = tracerAtt1
-                tracerBeam.Width0 = 0.08
-                tracerBeam.Width1 = 0.08
-                tracerBeam.FaceCamera = true
-                tracerBeam.Segments = 1
-                tracerBeam.LightEmission = 1
-            end
+        if not currentTargetHighlight or currentTargetHighlight.Adornee ~= currentTarget then
+            if currentTargetHighlight then currentTargetHighlight:Destroy() end
+            currentTargetHighlight = Instance.new("Highlight")
+            currentTargetHighlight.FillColor = getAccent()
+            currentTargetHighlight.OutlineColor = Color3.new(1,1,1)
+            currentTargetHighlight.Adornee = currentTarget
+            currentTargetHighlight.Parent = currentTarget
         end
-
-        targetHighlight.FillColor = getAccent()
-        targetHighlight.FillTransparency = pulse
-
-        if tracerBeam then
-            local accent = getAccent()
-            tracerBeam.Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0, Color3.new(1,1,1)),
-                ColorSequenceKeypoint.new(0.1, accent),
-                ColorSequenceKeypoint.new(0.9, accent),
-                ColorSequenceKeypoint.new(1, Color3.new(1,1,1)),
-            })
-            tracerBeam.Transparency = NumberSequence.new(pulse - 0.3)
-        end
-
-    elseif targetHighlight then
-        targetHighlight:Destroy()
-        targetHighlight = nil
-        if tracerBeam then tracerBeam:Destroy() tracerBeam = nil end
-        if tracerAtt0 then tracerAtt0:Destroy() tracerAtt0 = nil end
-        if tracerAtt1 then tracerAtt1:Destroy() tracerAtt1 = nil end
+        currentTargetHighlight.FillColor = getAccent()
+        currentTargetHighlight.FillTransparency = pulse
+    elseif currentTargetHighlight then
+        currentTargetHighlight:Destroy()
+        currentTargetHighlight = nil
     end
 
     for _, plr in pairs(Players:GetPlayers()) do
@@ -152,10 +159,28 @@ local function UpdateVisuals(currentTarget)
             friendHighlights[plr] = nil
         end
     end
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and IsTargeted(plr) and plr.Character then
+            if not targetHighlights[plr] or targetHighlights[plr].Adornee ~= plr.Character then
+                if targetHighlights[plr] then targetHighlights[plr]:Destroy() end
+                local h = Instance.new("Highlight")
+                h.FillColor = TARGET_COLOR
+                h.OutlineColor = Color3.new(0,0,0)
+                h.Adornee = plr.Character
+                h.Parent = plr.Character
+                targetHighlights[plr] = h
+            end
+            targetHighlights[plr].FillTransparency = pulse
+        elseif targetHighlights[plr] then
+            targetHighlights[plr]:Destroy()
+            targetHighlights[plr] = nil
+        end
+    end
 end
 
 -- ────────────────────────────────────────────────
---  ANTI-RAG
+--  ANTI-RAG (original logic, untouched)
 -- ────────────────────────────────────────────────
 local _arc_safeCFrame = CFrame.new(-502.844818, 11.1868954, -65.4427567)
 local _arc_conn, _arc_platConn, _arc_platform, _arc_platformHB, _arc_origCF, _arc_returnTask
@@ -236,6 +261,58 @@ local function arc_onCharacter(char)
 end
 
 -- ────────────────────────────────────────────────
+--  DEATH TP
+-- ────────────────────────────────────────────────
+local deathCFrame = nil
+
+local function SetupDeathTP(char)
+    local hrp = char:WaitForChild("HumanoidRootPart", 8)
+    local hum = char:WaitForChild("Humanoid", 8)
+    if not hrp or not hum then return end
+
+    local posConn = RunService.Heartbeat:Connect(function()
+        if hrp and hrp.Parent then
+            deathCFrame = hrp.CFrame
+        end
+    end)
+
+    hum.Died:Connect(function()
+        posConn:Disconnect()
+    end)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if deathCFrame then
+        local savedCF = deathCFrame
+        char:WaitForChild("HumanoidRootPart", 8)
+        task.defer(function()
+            if Features.DeathTP and savedCF then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.CFrame = savedCF
+                end
+            end
+        end)
+    end
+    task.spawn(SetupDeathTP, char)
+    task.spawn(arc_onCharacter, char)
+end)
+
+-- ────────────────────────────────────────────────
+--  GRAB SPAM
+-- ────────────────────────────────────────────────
+task.spawn(function()
+    while true do
+        task.wait()
+        if Features.GrabSpam then
+            pcall(function()
+                GrabRF:InvokeServer()
+            end)
+        end
+    end
+end)
+
+-- ────────────────────────────────────────────────
 --  MAIN LOOP
 -- ────────────────────────────────────────────────
 RunService.Heartbeat:Connect(function()
@@ -245,8 +322,10 @@ RunService.Heartbeat:Connect(function()
     local currentTarget = nil
     if Features.KillAura then
         local closest, dist = nil, 16
+        local targetsActive = HasTargets()
         for _, p in Players:GetPlayers() do
             if p == LocalPlayer or IsWhitelisted(p) then continue end
+            if targetsActive and not IsTargeted(p) then continue end
             local c = p.Character
             if c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChild("Humanoid") and c.Humanoid.Health > 0 then
                 local d = (c.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
@@ -276,13 +355,8 @@ local activeNotifLabel = nil
 local activeNotifTask = nil
 
 local function dismissNotif(notif, conn)
-    if activeNotif == notif then
-        activeNotif = nil
-        activeNotifLabel = nil
-    end
-    if activeNotifConn == conn then
-        activeNotifConn = nil
-    end
+    if activeNotif == notif then activeNotif = nil activeNotifLabel = nil end
+    if activeNotifConn == conn then activeNotifConn = nil end
     TweenService:Create(notif, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         Position = UDim2.new(0.5, -110, 0, -40)
     }):Play()
@@ -300,9 +374,7 @@ local function showNotif(text)
             Position = UDim2.new(0.5, -110, 0, 12)
         }):Play()
         activeNotifTask = task.delay(1.0, function()
-            if activeNotif and activeNotif.Parent then
-                dismissNotif(activeNotif, activeNotifConn)
-            end
+            if activeNotif and activeNotif.Parent then dismissNotif(activeNotif, activeNotifConn) end
         end)
         return
     end
@@ -343,21 +415,43 @@ local function showNotif(text)
     }):Play()
 
     activeNotifTask = task.delay(1.0, function()
-        if notif and notif.Parent then
-            dismissNotif(notif, conn)
-        end
+        if notif and notif.Parent then dismissNotif(notif, conn) end
     end)
 end
 
+-- ────────────────────────────────────────────────
+--  TOGGLE (standard) + FIRE-ONCE for Reset
+-- ────────────────────────────────────────────────
 local function ToggleFeature(name, ind)
     Features[name] = not Features[name]
     ind.BackgroundColor3 = Features[name] and getAccent() or Color3.fromRGB(60,60,60)
     showNotif(name .. " " .. (Features[name] and "enabled" or "disabled"))
 end
 
+-- Fire-once: activates, does the thing, deactivates immediately
+local function FireReset(ind)
+    Features.Reset = true
+    ind.BackgroundColor3 = getAccent()
+    showNotif("Reset!")
+
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = 0 end
+    end
+
+    task.defer(function()
+        Features.Reset = false
+        ind.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    end)
+end
+
+-- ────────────────────────────────────────────────
+--  MAIN FRAME
+-- ────────────────────────────────────────────────
 local MainFrame = Instance.new("Frame", sg)
-MainFrame.Size = UDim2.new(0, 260, 0, 340)
-MainFrame.Position = UDim2.new(1, -280, 0.5, -170)
+MainFrame.Size = UDim2.new(0, 260, 0, 420)
+MainFrame.Position = UDim2.new(1, -280, 0.5, -210)
 MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
 MainFrame.BorderSizePixel = 0; MainFrame.Active = true; MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame)
@@ -391,7 +485,7 @@ RunService.RenderStepped:Connect(function(dt)
     triggerStroke.Color = Color3.fromHSV(rainbowPhase, 1, v2)
 
     for name, ind in pairs(indRefs) do
-        if Features[name] then
+        if name ~= "Reset" and Features[name] then
             ind.BackgroundColor3 = getAccent()
         end
     end
@@ -411,10 +505,20 @@ title.Size = UDim2.new(1, 0, 0, 40); title.BackgroundTransparency = 1
 title.Text = "RB // COMBAT"; title.TextColor3 = Color3.new(1,1,1)
 title.Font = Enum.Font.GothamBold; title.TextSize = 14; title.ZIndex = 2
 
+local ScrollFrame = Instance.new("ScrollingFrame", MainFrame)
+ScrollFrame.Size = UDim2.new(1, 0, 1, -40)
+ScrollFrame.Position = UDim2.new(0, 0, 0, 40)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 3
+ScrollFrame.ScrollBarImageColor3 = Color3.new(1,1,1)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 560)
+ScrollFrame.ZIndex = 2
+
 local keybindButtons = {}
 
 local function CreateFeature(name, pos)
-    local bg = Instance.new("TextButton", MainFrame)
+    local bg = Instance.new("TextButton", ScrollFrame)
     bg.Size = UDim2.new(0, 155, 0, 38)
     bg.Position = UDim2.new(0.075, 0, 0, pos)
     bg.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
@@ -426,16 +530,12 @@ local function CreateFeature(name, pos)
     local ind = Instance.new("Frame", bg)
     ind.Size = UDim2.new(0, 4, 0.5, 0)
     ind.Position = UDim2.new(0, 5, 0.25, 0)
-    ind.BackgroundColor3 = Features[name] and getAccent() or Color3.fromRGB(60,60,60)
+    ind.BackgroundColor3 = (Features[name] and name ~= "Reset") and getAccent() or Color3.fromRGB(60,60,60)
     ind.ZIndex = 3
 
     indRefs[name] = ind
 
-    bg.MouseButton1Click:Connect(function()
-        ToggleFeature(name, ind)
-    end)
-
-    local kb = Instance.new("TextButton", MainFrame)
+    local kb = Instance.new("TextButton", ScrollFrame)
     kb.Size = UDim2.new(0, 58, 0, 38)
     kb.Position = UDim2.new(0, 172, 0, pos)
     kb.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
@@ -450,6 +550,17 @@ local function CreateFeature(name, pos)
     table.insert(kbStrokes, kbStroke)
 
     keybindButtons[name] = {button = kb, ind = ind}
+
+    if name == "Reset" then
+        -- Click fires once and immediately resets indicator
+        bg.MouseButton1Click:Connect(function()
+            FireReset(ind)
+        end)
+    else
+        bg.MouseButton1Click:Connect(function()
+            ToggleFeature(name, ind)
+        end)
+    end
 
     kb.MouseButton1Click:Connect(function()
         if bindingFor == name then
@@ -468,10 +579,85 @@ local function CreateFeature(name, pos)
     end)
 end
 
-CreateFeature("KillAura", 50)
-CreateFeature("AutoBlock", 95)
-CreateFeature("AntiRag", 140)
+CreateFeature("KillAura",  10)
+CreateFeature("AutoBlock", 55)
+CreateFeature("AntiRag",  100)
+CreateFeature("DeathTP",  145)
+CreateFeature("GrabSpam", 190)
+CreateFeature("Reset",    235)
 
+-- ── Friend Whitelist ──
+local friendLabel = Instance.new("TextLabel", ScrollFrame)
+friendLabel.Size = UDim2.new(1, 0, 0, 20)
+friendLabel.Position = UDim2.new(0, 0, 0, 288)
+friendLabel.BackgroundTransparency = 1
+friendLabel.Text = "FRIEND WHITELIST (WHITE)"
+friendLabel.TextColor3 = FRIEND_COLOR
+friendLabel.Font = Enum.Font.GothamBold
+friendLabel.TextSize = 10; friendLabel.ZIndex = 2
+
+local friendBox = Instance.new("TextBox", ScrollFrame)
+friendBox.Size = UDim2.new(0.85, 0, 0, 60)
+friendBox.Position = UDim2.new(0.075, 0, 0, 311)
+friendBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+friendBox.Text = Features.Friends
+friendBox.TextColor3 = Color3.new(1,1,1)
+friendBox.TextSize = 12; friendBox.Font = Enum.Font.Gotham
+friendBox.ClearTextOnFocus = false; friendBox.TextWrapped = true
+friendBox.TextYAlignment = Enum.TextYAlignment.Top; friendBox.ZIndex = 2
+Instance.new("UICorner", friendBox)
+
+friendBox.FocusLost:Connect(function()
+    Features.Friends = friendBox.Text
+    SaveFriends(friendBox.Text)
+end)
+
+-- ── Target List ──
+local targetLabel = Instance.new("TextLabel", ScrollFrame)
+targetLabel.Size = UDim2.new(1, 0, 0, 20)
+targetLabel.Position = UDim2.new(0, 0, 0, 383)
+targetLabel.BackgroundTransparency = 1
+targetLabel.Text = "TARGET LIST (BLACK)"
+targetLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+targetLabel.Font = Enum.Font.GothamBold
+targetLabel.TextSize = 10; targetLabel.ZIndex = 2
+
+local targetBox = Instance.new("TextBox", ScrollFrame)
+targetBox.Size = UDim2.new(0.85, 0, 0, 60)
+targetBox.Position = UDim2.new(0.075, 0, 0, 406)
+targetBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+targetBox.Text = Features.Targets
+targetBox.TextColor3 = Color3.new(1,1,1)
+targetBox.TextSize = 12; targetBox.Font = Enum.Font.Gotham
+targetBox.ClearTextOnFocus = false; targetBox.TextWrapped = true
+targetBox.TextYAlignment = Enum.TextYAlignment.Top; targetBox.ZIndex = 2
+Instance.new("UICorner", targetBox)
+
+targetBox.FocusLost:Connect(function()
+    Features.Targets = targetBox.Text
+    SaveTargets(targetBox.Text)
+end)
+
+-- ────────────────────────────────────────────────
+--  DRAG
+-- ────────────────────────────────────────────────
+local dragging, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- ────────────────────────────────────────────────
+--  KEYBINDS
+-- ────────────────────────────────────────────────
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
 
@@ -496,51 +682,21 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
     for name, key in pairs(Keybinds) do
         if key and input.KeyCode == key then
-            ToggleFeature(name, indRefs[name])
+            if name == "Reset" then
+                FireReset(indRefs[name])
+            else
+                ToggleFeature(name, indRefs[name])
+            end
         end
     end
 end)
 
-local friendLabel = Instance.new("TextLabel", MainFrame)
-friendLabel.Size = UDim2.new(1, 0, 0, 20)
-friendLabel.Position = UDim2.new(0, 0, 0, 195)
-friendLabel.BackgroundTransparency = 1
-friendLabel.Text = "FRIEND WHITELIST (WHITE)"
-friendLabel.TextColor3 = FRIEND_COLOR
-friendLabel.Font = Enum.Font.GothamBold
-friendLabel.TextSize = 10; friendLabel.ZIndex = 2
+-- ────────────────────────────────────────────────
+--  INIT
+-- ────────────────────────────────────────────────
+if LocalPlayer.Character then
+    task.spawn(SetupDeathTP, LocalPlayer.Character)
+    task.spawn(arc_onCharacter, LocalPlayer.Character)
+end
 
-local box = Instance.new("TextBox", MainFrame)
-box.Size = UDim2.new(0.85, 0, 0, 80)
-box.Position = UDim2.new(0.075, 0, 0, 220)
-box.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-box.Text = Features.Friends
-box.TextColor3 = Color3.new(1,1,1)
-box.TextSize = 12; box.Font = Enum.Font.Gotham
-box.ClearTextOnFocus = false; box.TextWrapped = true
-box.TextYAlignment = Enum.TextYAlignment.Top; box.ZIndex = 2
-Instance.new("UICorner", box)
-
-box.FocusLost:Connect(function()
-    Features.Friends = box.Text
-    SaveFriends(box.Text)
-end)
-
-local dragging, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
-        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-
-if LocalPlayer.Character then task.spawn(arc_onCharacter, LocalPlayer.Character) end
-LocalPlayer.CharacterAdded:Connect(arc_onCharacter)
-
-print("RB FULL SYSTEM LOADED - REVERTED RAG LOGIC")
+print("RB FULL SYSTEM LOADED - REVERTED RAG LOGIC + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET")
