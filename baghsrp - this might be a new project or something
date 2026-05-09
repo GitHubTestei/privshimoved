@@ -18,23 +18,29 @@ local function getAccent()
 end
 
 local Features = {
-    KillAura   = true,
-    AutoBlock  = true,
-    AntiRag    = true,
-    DeathTP    = true,
-    GrabSpam   = true,
-    Reset      = false,
-    Friends    = "",
-    Targets    = ""
+    KillAura    = false,
+    AutoBlock   = true,
+    AntiRag     = true,
+    DeathTP     = true,
+    GrabSpam    = false,
+    Hidden      = false,
+    RainbowName = true,
+    AntiVoid    = false,
+    Reset       = false,
+    Friends     = "",
+    Targets     = ""
 }
 
 local Keybinds = {
-    KillAura  = nil,
-    AutoBlock = nil,
-    AntiRag   = nil,
-    DeathTP   = nil,
-    GrabSpam  = nil,
-    Reset     = nil,
+    KillAura    = nil,
+    AutoBlock   = nil,
+    AntiRag     = nil,
+    DeathTP     = nil,
+    GrabSpam    = nil,
+    Hidden      = nil,
+    RainbowName = nil,
+    AntiVoid    = nil,
+    Reset       = nil,
 }
 
 local bindingFor = nil
@@ -180,7 +186,7 @@ local function UpdateVisuals(currentTarget)
 end
 
 -- ────────────────────────────────────────────────
---  ANTI-RAG (original logic, untouched)
+--  ANTI-RAG
 -- ────────────────────────────────────────────────
 local _arc_safeCFrame = CFrame.new(-502.844818, 11.1868954, -65.4427567)
 local _arc_conn, _arc_platConn, _arc_platform, _arc_platformHB, _arc_origCF, _arc_returnTask
@@ -197,26 +203,29 @@ local function arc_spawnPlatform(pos)
     model.Name = "AntiRagSafe"
     _arc_platform = model
     local fy = pos.Y - 3.5
-    local function box(cf,sz)
+    local function box(cf, sz)
         local p = Instance.new("Part", model)
-        p.Size=sz p.CFrame=cf p.Anchored=true p.CanCollide=true p.Transparency=0.7 p.Color=getAccent()
+        p.Size = sz p.CFrame = cf p.Anchored = true p.CanCollide = true p.Transparency = 0.7 p.Color = getAccent()
     end
-    box(CFrame.new(pos.X,fy-0.5,pos.Z), Vector3.new(16,1,16))
+    box(CFrame.new(pos.X, fy - 0.5, pos.Z), Vector3.new(16, 1, 16))
     _arc_platformHB = RunService.Heartbeat:Connect(function()
         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if hrp and hrp.Position.Y < fy then hrp.CFrame = CFrame.new(pos.X, fy + 3.5, pos.Z) hrp.AssemblyLinearVelocity = Vector3.zero end
+        if hrp and hrp.Position.Y < fy then
+            hrp.CFrame = CFrame.new(pos.X, fy + 3.5, pos.Z)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end
     end)
 end
 
 local function arc_forceEndRagdoll(char)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then hum.PlatformStand = false; hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
-    for _,o in char:GetDescendants() do if o:IsA("Motor6D") then o.Enabled = true end end
+    for _, o in char:GetDescendants() do if o:IsA("Motor6D") then o.Enabled = true end end
 end
 
 local function arc_onCharacter(char)
-    local hrp = char:WaitForChild("HumanoidRootPart",8)
-    local hum = char:WaitForChild("Humanoid",8)
+    local hrp = char:WaitForChild("HumanoidRootPart", 8)
+    local hum = char:WaitForChild("Humanoid", 8)
     if not hrp or not hum then return end
     task.wait(2.2)
     _arc_platConn = hum:GetPropertyChangedSignal("PlatformStand"):Connect(function()
@@ -226,9 +235,11 @@ local function arc_onCharacter(char)
     _arc_conn = RunService.Heartbeat:Connect(function()
         if not Features.AntiRag or not char.Parent then return end
         if _arc_inReturn then return end
-        local total, disabled = 0,0
-        for _,v in char:GetDescendants() do if v:IsA("Motor6D") then total+=1 if not v.Enabled then disabled+=1 end end end
-        if total >= 12 and disabled/total >= 0.9 then
+        local total, disabled = 0, 0
+        for _, v in char:GetDescendants() do
+            if v:IsA("Motor6D") then total += 1 if not v.Enabled then disabled += 1 end end
+        end
+        if total >= 12 and disabled / total >= 0.9 then
             if not _arc_origCF then _arc_origCF = hrp.CFrame end
             if _arc_wasGrabbed then
                 if not _arc_cleaned then arc_forceEndRagdoll(char) _arc_cleaned = true end
@@ -261,6 +272,119 @@ local function arc_onCharacter(char)
 end
 
 -- ────────────────────────────────────────────────
+--  HIDDEN (DESYNC)
+-- ────────────────────────────────────────────────
+local desyncT = { enabled = false, loc = CFrame.new() }
+local customDesyncEnabled = true
+
+local TextBoxX = { Text = "0" }
+local TextBoxY = { Text = "-10" }
+local TextBoxZ = { Text = "0" }
+
+local function getOffsetCFrame()
+    if customDesyncEnabled then
+        local x = tonumber(TextBoxX.Text) or 0
+        local y = tonumber(TextBoxY.Text) or 0
+        local z = tonumber(TextBoxZ.Text) or 0
+        return CFrame.new(x, y, z)
+    else
+        local ping = LocalPlayer:GetNetworkPing() * 1000
+        if ping < 100 then return CFrame.new(0, 0, -2)
+        elseif ping <= 170 then return CFrame.new(0, 0, -2.7)
+        else return CFrame.new(0, 0, -3.7) end
+    end
+end
+
+local desynchook = nil
+local hookOk, hookErr = pcall(function()
+    desynchook = hookmetamethod(game, "__index", newcclosure(function(self, key)
+        if desyncT.enabled and not checkcaller() and
+           key == "CFrame" and
+           LocalPlayer.Character and
+           self == LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            return desyncT.loc
+        end
+        if desynchook then
+            return desynchook(self, key)
+        end
+        return (rawget(getrawmetatable(game), "__index"))(self, key)
+    end))
+end)
+if not hookOk then
+    warn("Hidden hook failed (may not affect other features):", hookErr)
+end
+
+RunService.Heartbeat:Connect(function()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not root or not humanoid then return end
+
+    if not Features.Hidden then
+        humanoid.CameraOffset = Vector3.new(0, 0, 0)
+        return
+    end
+
+    desyncT.loc = root.CFrame
+    local offset = getOffsetCFrame()
+    root.CFrame = desyncT.loc * offset
+    humanoid.CameraOffset = Vector3.new(0, 10, 0)
+
+    RunService.RenderStepped:Wait()
+
+    root.CFrame = desyncT.loc
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    desyncT.loc = CFrame.new()
+end)
+
+-- ────────────────────────────────────────────────
+--  RAINBOW NAME
+-- ────────────────────────────────────────────────
+local rainbowNameRemote = ReplicatedStorage:WaitForChild("Remotes", 10)
+rainbowNameRemote = rainbowNameRemote and rainbowNameRemote:FindFirstChild("SetRPNameColor")
+
+local rnHue = 0
+local rnLastUpdate = 0
+local rnSpeed = 1.0
+local rnUpdateRate = 0.02
+
+RunService.Heartbeat:Connect(function(dt)
+    if not Features.RainbowName then return end
+    if not rainbowNameRemote then return end
+    rnHue = (rnHue + (dt * rnSpeed)) % 1
+    local now = os.clock()
+    if now - rnLastUpdate >= rnUpdateRate then
+        local pastelColor = Color3.fromHSV(rnHue, 0.4, 1)
+        pcall(function() rainbowNameRemote:FireServer(pastelColor) end)
+        rnLastUpdate = now
+    end
+end)
+
+-- ────────────────────────────────────────────────
+--  ANTI VOID
+-- ────────────────────────────────────────────────
+local VOID_Y       = -30.4225769
+local VOID_SAFE_CF = CFrame.new(-107.33889, 3.03330231, 569.082764,
+                        0.0596544333, -1.85225701e-08,  0.998219073,
+                       -2.12445728e-09, 1,               1.86825755e-08,
+                       -0.998219073,  -3.23517213e-09,  0.0596544333)
+
+RunService.Heartbeat:Connect(function()
+    if not Features.AntiVoid then return end
+    local char = LocalPlayer.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if hrp.Position.Y <= VOID_Y then
+        hrp.CFrame = VOID_SAFE_CF
+        hrp.AssemblyLinearVelocity = Vector3.zero
+    end
+end)
+
+-- ────────────────────────────────────────────────
 --  DEATH TP
 -- ────────────────────────────────────────────────
 local deathCFrame = nil
@@ -288,9 +412,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
         task.defer(function()
             if Features.DeathTP and savedCF then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    hrp.CFrame = savedCF
-                end
+                if hrp then hrp.CFrame = savedCF end
             end
         end)
     end
@@ -305,9 +427,7 @@ task.spawn(function()
     while true do
         task.wait()
         if Features.GrabSpam then
-            pcall(function()
-                GrabRF:InvokeServer()
-            end)
+            pcall(function() GrabRF:InvokeServer() end)
         end
     end
 end)
@@ -420,29 +540,30 @@ local function showNotif(text)
 end
 
 -- ────────────────────────────────────────────────
---  TOGGLE (standard) + FIRE-ONCE for Reset
+--  TOGGLE + FIRE-ONCE for Reset
 -- ────────────────────────────────────────────────
 local function ToggleFeature(name, ind)
     Features[name] = not Features[name]
-    ind.BackgroundColor3 = Features[name] and getAccent() or Color3.fromRGB(60,60,60)
+    -- sync Hidden state to desyncT
+    if name == "Hidden" then
+        desyncT.enabled = Features.Hidden
+    end
+    ind.BackgroundColor3 = Features[name] and getAccent() or Color3.fromRGB(60, 60, 60)
     showNotif(name .. " " .. (Features[name] and "enabled" or "disabled"))
 end
 
--- Fire-once: activates, does the thing, deactivates immediately
 local function FireReset(ind)
     Features.Reset = true
     ind.BackgroundColor3 = getAccent()
     showNotif("Reset!")
-
     local char = LocalPlayer.Character
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
         if hum then hum.Health = 0 end
     end
-
     task.defer(function()
         Features.Reset = false
-        ind.BackgroundColor3 = Color3.fromRGB(60,60,60)
+        ind.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end)
 end
 
@@ -450,8 +571,8 @@ end
 --  MAIN FRAME
 -- ────────────────────────────────────────────────
 local MainFrame = Instance.new("Frame", sg)
-MainFrame.Size = UDim2.new(0, 260, 0, 420)
-MainFrame.Position = UDim2.new(1, -280, 0.5, -210)
+MainFrame.Size = UDim2.new(0, 260, 0, 555)
+MainFrame.Position = UDim2.new(1, -280, 0.5, -277)
 MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
 MainFrame.BorderSizePixel = 0; MainFrame.Active = true; MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame)
@@ -464,7 +585,7 @@ local Trigger = Instance.new("TextButton", sg)
 Trigger.Size = UDim2.new(0, 50, 0, 50)
 Trigger.Position = UDim2.new(1, -65, 0, 120)
 Trigger.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-Trigger.Text = "+"; Trigger.TextColor3 = Color3.new(1,1,1)
+Trigger.Text = "+"; Trigger.TextColor3 = Color3.new(1, 1, 1)
 Trigger.TextSize = 25; Trigger.Font = Enum.Font.GothamBold; Trigger.ZIndex = 10
 Instance.new("UICorner", Trigger).CornerRadius = UDim.new(1, 0)
 local triggerStroke = Instance.new("UIStroke", Trigger)
@@ -497,12 +618,12 @@ end)
 
 Trigger.MouseButton1Click:Connect(function()
     MainFrame.Visible = not MainFrame.Visible
-    TweenService:Create(Trigger, TweenInfo.new(0.3), {Rotation = MainFrame.Visible and 45 or 0}):Play()
+    TweenService:Create(Trigger, TweenInfo.new(0.3), { Rotation = MainFrame.Visible and 45 or 0 }):Play()
 end)
 
 local title = Instance.new("TextLabel", MainFrame)
 title.Size = UDim2.new(1, 0, 0, 40); title.BackgroundTransparency = 1
-title.Text = "RB // COMBAT"; title.TextColor3 = Color3.new(1,1,1)
+title.Text = "RB // COMBAT"; title.TextColor3 = Color3.new(1, 1, 1)
 title.Font = Enum.Font.GothamBold; title.TextSize = 14; title.ZIndex = 2
 
 local ScrollFrame = Instance.new("ScrollingFrame", MainFrame)
@@ -511,8 +632,8 @@ ScrollFrame.Position = UDim2.new(0, 0, 0, 40)
 ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.BorderSizePixel = 0
 ScrollFrame.ScrollBarThickness = 3
-ScrollFrame.ScrollBarImageColor3 = Color3.new(1,1,1)
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 560)
+ScrollFrame.ScrollBarImageColor3 = Color3.new(1, 1, 1)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 695)
 ScrollFrame.ZIndex = 2
 
 local keybindButtons = {}
@@ -523,14 +644,14 @@ local function CreateFeature(name, pos)
     bg.Position = UDim2.new(0.075, 0, 0, pos)
     bg.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
     bg.Text = name; bg.Font = Enum.Font.GothamSemibold
-    bg.TextSize = 12; bg.TextColor3 = Color3.new(0.8,0.8,0.8)
+    bg.TextSize = 12; bg.TextColor3 = Color3.new(0.8, 0.8, 0.8)
     bg.AutoButtonColor = false; bg.ZIndex = 2
     Instance.new("UICorner", bg)
 
     local ind = Instance.new("Frame", bg)
     ind.Size = UDim2.new(0, 4, 0.5, 0)
     ind.Position = UDim2.new(0, 5, 0.25, 0)
-    ind.BackgroundColor3 = (Features[name] and name ~= "Reset") and getAccent() or Color3.fromRGB(60,60,60)
+    ind.BackgroundColor3 = (Features[name] and name ~= "Reset") and getAccent() or Color3.fromRGB(60, 60, 60)
     ind.ZIndex = 3
 
     indRefs[name] = ind
@@ -539,57 +660,55 @@ local function CreateFeature(name, pos)
     kb.Size = UDim2.new(0, 58, 0, 38)
     kb.Position = UDim2.new(0, 172, 0, pos)
     kb.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    kb.Text = Keybinds[name] and tostring(Keybinds[name]):gsub("Enum.KeyCode.","") or "BIND"
+    kb.Text = Keybinds[name] and tostring(Keybinds[name]):gsub("Enum.KeyCode.", "") or "BIND"
     kb.Font = Enum.Font.GothamSemibold
     kb.TextSize = 10
-    kb.TextColor3 = Color3.new(1,1,1)
+    kb.TextColor3 = Color3.new(1, 1, 1)
     kb.AutoButtonColor = false; kb.ZIndex = 2
     Instance.new("UICorner", kb)
     local kbStroke = Instance.new("UIStroke", kb)
     kbStroke.Thickness = 1
     table.insert(kbStrokes, kbStroke)
 
-    keybindButtons[name] = {button = kb, ind = ind}
+    keybindButtons[name] = { button = kb, ind = ind }
 
     if name == "Reset" then
-        -- Click fires once and immediately resets indicator
-        bg.MouseButton1Click:Connect(function()
-            FireReset(ind)
-        end)
+        bg.MouseButton1Click:Connect(function() FireReset(ind) end)
     else
-        bg.MouseButton1Click:Connect(function()
-            ToggleFeature(name, ind)
-        end)
+        bg.MouseButton1Click:Connect(function() ToggleFeature(name, ind) end)
     end
 
     kb.MouseButton1Click:Connect(function()
         if bindingFor == name then
             bindingFor = nil
-            kb.Text = Keybinds[name] and tostring(Keybinds[name]):gsub("Enum.KeyCode.","") or "BIND"
-            kb.TextColor3 = Color3.new(1,1,1)
+            kb.Text = Keybinds[name] and tostring(Keybinds[name]):gsub("Enum.KeyCode.", "") or "BIND"
+            kb.TextColor3 = Color3.new(1, 1, 1)
         else
             if bindingFor and keybindButtons[bindingFor] then
                 local prev = keybindButtons[bindingFor]
-                prev.button.Text = Keybinds[bindingFor] and tostring(Keybinds[bindingFor]):gsub("Enum.KeyCode.","") or "BIND"
-                prev.button.TextColor3 = Color3.new(1,1,1)
+                prev.button.Text = Keybinds[bindingFor] and tostring(Keybinds[bindingFor]):gsub("Enum.KeyCode.", "") or "BIND"
+                prev.button.TextColor3 = Color3.new(1, 1, 1)
             end
             bindingFor = name
-            kb.Text = "..."; kb.TextColor3 = Color3.new(1,1,1)
+            kb.Text = "..."; kb.TextColor3 = Color3.new(1, 1, 1)
         end
     end)
 end
 
-CreateFeature("KillAura",  10)
-CreateFeature("AutoBlock", 55)
-CreateFeature("AntiRag",  100)
-CreateFeature("DeathTP",  145)
-CreateFeature("GrabSpam", 190)
-CreateFeature("Reset",    235)
+CreateFeature("KillAura",    10)
+CreateFeature("AutoBlock",   55)
+CreateFeature("AntiRag",    100)
+CreateFeature("DeathTP",    145)
+CreateFeature("GrabSpam",   190)
+CreateFeature("Hidden",     235)
+CreateFeature("RainbowName",280)
+CreateFeature("AntiVoid",   325)
+CreateFeature("Reset",      370)
 
 -- ── Friend Whitelist ──
 local friendLabel = Instance.new("TextLabel", ScrollFrame)
 friendLabel.Size = UDim2.new(1, 0, 0, 20)
-friendLabel.Position = UDim2.new(0, 0, 0, 288)
+friendLabel.Position = UDim2.new(0, 0, 0, 423)
 friendLabel.BackgroundTransparency = 1
 friendLabel.Text = "FRIEND WHITELIST (WHITE)"
 friendLabel.TextColor3 = FRIEND_COLOR
@@ -598,10 +717,10 @@ friendLabel.TextSize = 10; friendLabel.ZIndex = 2
 
 local friendBox = Instance.new("TextBox", ScrollFrame)
 friendBox.Size = UDim2.new(0.85, 0, 0, 60)
-friendBox.Position = UDim2.new(0.075, 0, 0, 311)
+friendBox.Position = UDim2.new(0.075, 0, 0, 446)
 friendBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 friendBox.Text = Features.Friends
-friendBox.TextColor3 = Color3.new(1,1,1)
+friendBox.TextColor3 = Color3.new(1, 1, 1)
 friendBox.TextSize = 12; friendBox.Font = Enum.Font.Gotham
 friendBox.ClearTextOnFocus = false; friendBox.TextWrapped = true
 friendBox.TextYAlignment = Enum.TextYAlignment.Top; friendBox.ZIndex = 2
@@ -615,7 +734,7 @@ end)
 -- ── Target List ──
 local targetLabel = Instance.new("TextLabel", ScrollFrame)
 targetLabel.Size = UDim2.new(1, 0, 0, 20)
-targetLabel.Position = UDim2.new(0, 0, 0, 383)
+targetLabel.Position = UDim2.new(0, 0, 0, 518)
 targetLabel.BackgroundTransparency = 1
 targetLabel.Text = "TARGET LIST (BLACK)"
 targetLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -624,10 +743,10 @@ targetLabel.TextSize = 10; targetLabel.ZIndex = 2
 
 local targetBox = Instance.new("TextBox", ScrollFrame)
 targetBox.Size = UDim2.new(0.85, 0, 0, 60)
-targetBox.Position = UDim2.new(0.075, 0, 0, 406)
+targetBox.Position = UDim2.new(0.075, 0, 0, 541)
 targetBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 targetBox.Text = Features.Targets
-targetBox.TextColor3 = Color3.new(1,1,1)
+targetBox.TextColor3 = Color3.new(1, 1, 1)
 targetBox.TextSize = 12; targetBox.Font = Enum.Font.Gotham
 targetBox.ClearTextOnFocus = false; targetBox.TextWrapped = true
 targetBox.TextYAlignment = Enum.TextYAlignment.Top; targetBox.ZIndex = 2
@@ -645,7 +764,9 @@ local dragging, dragStart, startPos
 MainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true; dragStart = input.Position; startPos = MainFrame.Position
-        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
     end
 end)
 UserInputService.InputChanged:Connect(function(input)
@@ -663,7 +784,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
     if input.KeyCode == Enum.KeyCode.LeftControl then
         MainFrame.Visible = not MainFrame.Visible
-        TweenService:Create(Trigger, TweenInfo.new(0.3), {Rotation = MainFrame.Visible and 45 or 0}):Play()
+        TweenService:Create(Trigger, TweenInfo.new(0.3), { Rotation = MainFrame.Visible and 45 or 0 }):Play()
         return
     end
 
@@ -672,11 +793,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         bindingFor = nil
         if input.KeyCode ~= Enum.KeyCode.Escape then
             Keybinds[name] = input.KeyCode
-            keybindButtons[name].button.Text = tostring(input.KeyCode):gsub("Enum.KeyCode.","")
+            keybindButtons[name].button.Text = tostring(input.KeyCode):gsub("Enum.KeyCode.", "")
         else
-            keybindButtons[name].button.Text = Keybinds[name] and tostring(Keybinds[name]):gsub("Enum.KeyCode.","") or "BIND"
+            keybindButtons[name].button.Text = Keybinds[name] and tostring(Keybinds[name]):gsub("Enum.KeyCode.", "") or "BIND"
         end
-        keybindButtons[name].button.TextColor3 = Color3.new(1,1,1)
+        keybindButtons[name].button.TextColor3 = Color3.new(1, 1, 1)
         return
     end
 
@@ -699,4 +820,4 @@ if LocalPlayer.Character then
     task.spawn(arc_onCharacter, LocalPlayer.Character)
 end
 
-print("RB FULL SYSTEM LOADED - REVERTED RAG LOGIC + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET")
+print("RB FULL SYSTEM LOADED - HIDDEN + RAINBOW NAME + REVERTED RAG + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET")
