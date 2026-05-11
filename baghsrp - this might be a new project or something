@@ -18,29 +18,33 @@ local function getAccent()
 end
 
 local Features = {
-    KillAura    = false,
-    AutoBlock   = true,
-    AntiRag     = true,
-    DeathTP     = true,
-    GrabSpam    = false,
-    Hidden      = false,
-    RainbowName = true,
-    AntiVoid    = true,
-    Reset       = false,
-    Friends     = "",
-    Targets     = ""
+    KillAura             = false,
+    ["- KillAura Anims"] = false,
+    AutoBlock            = true,
+    AntiRag              = true,
+    DeathTP              = true,
+    GrabSpam             = false,
+    Hidden               = false,
+    RainbowName          = true,
+    AntiVoid             = true,
+    NoSlowdown           = true,
+    Reset                = false,
+    Friends              = "",
+    Targets              = ""
 }
 
 local Keybinds = {
-    KillAura    = nil,
-    AutoBlock   = nil,
-    AntiRag     = nil,
-    DeathTP     = nil,
-    GrabSpam    = nil,
-    Hidden      = nil,
-    RainbowName = nil,
-    AntiVoid    = nil,
-    Reset       = nil,
+    KillAura             = nil,
+    ["- KillAura Anims"] = nil,
+    AutoBlock            = nil,
+    AntiRag              = nil,
+    DeathTP              = nil,
+    GrabSpam             = nil,
+    Hidden               = nil,
+    RainbowName          = nil,
+    AntiVoid             = nil,
+    NoSlowdown           = nil,
+    Reset                = nil,
 }
 
 local bindingFor = nil
@@ -124,6 +128,31 @@ end
 local CombatRF = ReplicatedStorage:WaitForChild("OldPackages", 8):WaitForChild("Knit", 5):WaitForChild("Services", 5):WaitForChild("CombatService", 5):WaitForChild("RF", 5)
 local HitRF, BlockRF = CombatRF:WaitForChild("Hit", 5), CombatRF:WaitForChild("Block", 5)
 local GrabRF = CombatRF:WaitForChild("Grab", 5)
+
+-- ── Anim assets (loaded once) ──
+local animPath   = ReplicatedStorage:WaitForChild("OldControllers", 8):WaitForChild("CombatClient", 5):WaitForChild("Animations", 5)
+local rightPunch = animPath:WaitForChild("Right Punch", 5)
+local leftPunch  = animPath:WaitForChild("Left Punch", 5)
+
+local ANIM_DELAY   = 0.1
+local lastAnimTime = 0
+
+local function PlayKillAuraAnim()
+    local now = os.clock()
+    if now - lastAnimTime < ANIM_DELAY then return end
+    lastAnimTime = now
+
+    local char = LocalPlayer.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    local anim = hum and hum:FindFirstChildOfClass("Animator")
+    if not anim then return end
+
+    local punch = (math.random(1, 2) == 1) and rightPunch or leftPunch
+    pcall(function()
+        local track = anim:LoadAnimation(punch)
+        track:Play()
+    end)
+end
 
 local friendHighlights = {}
 local targetHighlights = {}
@@ -270,6 +299,19 @@ local function arc_onCharacter(char)
         end
     end)
 end
+
+-- ────────────────────────────────────────────────
+--  NO SLOWDOWN
+-- ────────────────────────────────────────────────
+RunService.Heartbeat:Connect(function()
+    if not Features.NoSlowdown then return end
+    local char = LocalPlayer.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    if hum.WalkSpeed < 16 then
+        hum.WalkSpeed = 16
+    end
+end)
 
 -- ────────────────────────────────────────────────
 --  HIDDEN (DESYNC)
@@ -455,6 +497,9 @@ RunService.Heartbeat:Connect(function()
         if closest then
             currentTarget = closest
             pcall(HitRF.InvokeServer, HitRF, closest.Humanoid, char.HumanoidRootPart.Position)
+            if Features["- KillAura Anims"] then
+                PlayKillAuraAnim()
+            end
         end
     end
     UpdateVisuals(currentTarget)
@@ -544,7 +589,6 @@ end
 -- ────────────────────────────────────────────────
 local function ToggleFeature(name, ind)
     Features[name] = not Features[name]
-    -- sync Hidden state to desyncT
     if name == "Hidden" then
         desyncT.enabled = Features.Hidden
     end
@@ -633,7 +677,7 @@ ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.BorderSizePixel = 0
 ScrollFrame.ScrollBarThickness = 3
 ScrollFrame.ScrollBarImageColor3 = Color3.new(1, 1, 1)
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 695)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 795)
 ScrollFrame.ZIndex = 2
 
 local keybindButtons = {}
@@ -695,20 +739,22 @@ local function CreateFeature(name, pos)
     end)
 end
 
-CreateFeature("KillAura",    10)
-CreateFeature("AutoBlock",   55)
-CreateFeature("AntiRag",    100)
-CreateFeature("DeathTP",    145)
-CreateFeature("GrabSpam",   190)
-CreateFeature("Hidden",     235)
-CreateFeature("RainbowName",280)
-CreateFeature("AntiVoid",   325)
-CreateFeature("Reset",      370)
+CreateFeature("KillAura",            10)
+CreateFeature("- KillAura Anims",    55)
+CreateFeature("AutoBlock",          100)
+CreateFeature("AntiRag",            145)
+CreateFeature("DeathTP",            190)
+CreateFeature("GrabSpam",           235)
+CreateFeature("Hidden",             280)
+CreateFeature("RainbowName",        325)
+CreateFeature("AntiVoid",           370)
+CreateFeature("NoSlowdown",         415)
+CreateFeature("Reset",              460)
 
 -- ── Friend Whitelist ──
 local friendLabel = Instance.new("TextLabel", ScrollFrame)
 friendLabel.Size = UDim2.new(1, 0, 0, 20)
-friendLabel.Position = UDim2.new(0, 0, 0, 423)
+friendLabel.Position = UDim2.new(0, 0, 0, 513)
 friendLabel.BackgroundTransparency = 1
 friendLabel.Text = "FRIEND WHITELIST (WHITE)"
 friendLabel.TextColor3 = FRIEND_COLOR
@@ -717,7 +763,7 @@ friendLabel.TextSize = 10; friendLabel.ZIndex = 2
 
 local friendBox = Instance.new("TextBox", ScrollFrame)
 friendBox.Size = UDim2.new(0.85, 0, 0, 60)
-friendBox.Position = UDim2.new(0.075, 0, 0, 446)
+friendBox.Position = UDim2.new(0.075, 0, 0, 536)
 friendBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 friendBox.Text = Features.Friends
 friendBox.TextColor3 = Color3.new(1, 1, 1)
@@ -734,7 +780,7 @@ end)
 -- ── Target List ──
 local targetLabel = Instance.new("TextLabel", ScrollFrame)
 targetLabel.Size = UDim2.new(1, 0, 0, 20)
-targetLabel.Position = UDim2.new(0, 0, 0, 518)
+targetLabel.Position = UDim2.new(0, 0, 0, 608)
 targetLabel.BackgroundTransparency = 1
 targetLabel.Text = "TARGET LIST (BLACK)"
 targetLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -743,7 +789,7 @@ targetLabel.TextSize = 10; targetLabel.ZIndex = 2
 
 local targetBox = Instance.new("TextBox", ScrollFrame)
 targetBox.Size = UDim2.new(0.85, 0, 0, 60)
-targetBox.Position = UDim2.new(0.075, 0, 0, 541)
+targetBox.Position = UDim2.new(0.075, 0, 0, 631)
 targetBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 targetBox.Text = Features.Targets
 targetBox.TextColor3 = Color3.new(1, 1, 1)
@@ -820,4 +866,4 @@ if LocalPlayer.Character then
     task.spawn(arc_onCharacter, LocalPlayer.Character)
 end
 
-print("RB FULL SYSTEM LOADED - HIDDEN + RAINBOW NAME + REVERTED RAG + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET")
+print("RB FULL SYSTEM LOADED - HIDDEN + RAINBOW NAME + REVERTED RAG + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET + KA ANIMS + NOSLOWDOWN")
