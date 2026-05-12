@@ -25,6 +25,7 @@ local Features = {
     DeathTP              = true,
     GrabSpam             = false,
     Hidden               = false,
+    ["- Extra Clip"]     = false,
     RainbowName          = true,
     AntiVoid             = true,
     NoSlowdown           = true,
@@ -41,6 +42,7 @@ local Keybinds = {
     DeathTP              = nil,
     GrabSpam             = nil,
     Hidden               = nil,
+    ["- Extra Clip"]     = nil,
     RainbowName          = nil,
     AntiVoid             = nil,
     NoSlowdown           = nil,
@@ -319,22 +321,38 @@ end)
 local desyncT = { enabled = false, loc = CFrame.new() }
 local customDesyncEnabled = true
 
+-- Variables for the 0.5s delay
+local lastExtraClipToggleTime = 0
+local extraClipActive = false
+
 local TextBoxX = { Text = "0" }
 local TextBoxY = { Text = "-10" }
 local TextBoxZ = { Text = "0" }
 
 local function getOffsetCFrame()
+    local baseY
     if customDesyncEnabled then
-        local x = tonumber(TextBoxX.Text) or 0
-        local y = tonumber(TextBoxY.Text) or 0
-        local z = tonumber(TextBoxZ.Text) or 0
-        return CFrame.new(x, y, z)
+        baseY = tonumber(TextBoxY.Text) or -10
     else
         local ping = LocalPlayer:GetNetworkPing() * 1000
-        if ping < 100 then return CFrame.new(0, 0, -2)
-        elseif ping <= 170 then return CFrame.new(0, 0, -2.7)
-        else return CFrame.new(0, 0, -3.7) end
+        if ping < 100 then baseY = 0
+        elseif ping <= 170 then baseY = 0
+        else baseY = 0 end
     end
+
+    -- We handle extraY inside the Heartbeat loop now to manage the delay properly
+    local x = customDesyncEnabled and (tonumber(TextBoxX.Text) or 0) or 0
+    local z
+    if customDesyncEnabled then
+        z = tonumber(TextBoxZ.Text) or 0
+    else
+        local ping = LocalPlayer:GetNetworkPing() * 1000
+        if ping < 100 then z = -2
+        elseif ping <= 170 then z = -2.7
+        else z = -3.7 end
+    end
+
+    return CFrame.new(x, baseY, z)
 end
 
 local desynchook = nil
@@ -365,13 +383,33 @@ RunService.Heartbeat:Connect(function()
 
     if not Features.Hidden then
         humanoid.CameraOffset = Vector3.new(0, 0, 0)
+        extraClipActive = false
         return
     end
 
+    -- Toggle Logic: Detect when Extra Clip is turned ON
+    if Features["- Extra Clip"] then
+        if not extraClipActive then
+            extraClipActive = true
+            lastExtraClipToggleTime = tick() -- Start the 0.5s timer
+        end
+    else
+        extraClipActive = false
+    end
+
+    -- Check if the 0.5s delay has passed
+    local isDelayOver = (tick() - lastExtraClipToggleTime) >= 0.2
+    local currentlyUsingExtra = Features["- Extra Clip"] and isDelayOver
+
     desyncT.loc = root.CFrame
     local offset = getOffsetCFrame()
-    root.CFrame = desyncT.loc * offset
-    humanoid.CameraOffset = Vector3.new(0, 10, 0)
+
+    -- Apply the extra -10 only after the 0.5s delay
+    local extraY = currentlyUsingExtra and -10 or 0
+    local camOffsetY = currentlyUsingExtra and 20 or 10
+
+    root.CFrame = desyncT.loc * offset * CFrame.new(0, extraY, 0)
+    humanoid.CameraOffset = Vector3.new(0, camOffsetY, 0)
 
     RunService.RenderStepped:Wait()
 
@@ -615,8 +653,8 @@ end
 --  MAIN FRAME
 -- ────────────────────────────────────────────────
 local MainFrame = Instance.new("Frame", sg)
-MainFrame.Size = UDim2.new(0, 260, 0, 555)
-MainFrame.Position = UDim2.new(1, -280, 0.5, -277)
+MainFrame.Size = UDim2.new(0, 260, 0, 600)  -- slightly taller for extra row
+MainFrame.Position = UDim2.new(1, -280, 0.5, -300)
 MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
 MainFrame.BorderSizePixel = 0; MainFrame.Active = true; MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame)
@@ -677,7 +715,7 @@ ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.BorderSizePixel = 0
 ScrollFrame.ScrollBarThickness = 3
 ScrollFrame.ScrollBarImageColor3 = Color3.new(1, 1, 1)
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 795)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 840)  -- +45 for extra row
 ScrollFrame.ZIndex = 2
 
 local keybindButtons = {}
@@ -746,15 +784,16 @@ CreateFeature("AntiRag",            145)
 CreateFeature("DeathTP",            190)
 CreateFeature("GrabSpam",           235)
 CreateFeature("Hidden",             280)
-CreateFeature("RainbowName",        325)
-CreateFeature("AntiVoid",           370)
-CreateFeature("NoSlowdown",         415)
-CreateFeature("Reset",              460)
+CreateFeature("- Extra Clip",       325)  -- sits under Hidden, +45 from it
+CreateFeature("RainbowName",        370)  -- everything below shifted +45
+CreateFeature("AntiVoid",           415)
+CreateFeature("NoSlowdown",         460)
+CreateFeature("Reset",              505)
 
 -- ── Friend Whitelist ──
 local friendLabel = Instance.new("TextLabel", ScrollFrame)
 friendLabel.Size = UDim2.new(1, 0, 0, 20)
-friendLabel.Position = UDim2.new(0, 0, 0, 513)
+friendLabel.Position = UDim2.new(0, 0, 0, 558)
 friendLabel.BackgroundTransparency = 1
 friendLabel.Text = "FRIEND WHITELIST (WHITE)"
 friendLabel.TextColor3 = FRIEND_COLOR
@@ -763,7 +802,7 @@ friendLabel.TextSize = 10; friendLabel.ZIndex = 2
 
 local friendBox = Instance.new("TextBox", ScrollFrame)
 friendBox.Size = UDim2.new(0.85, 0, 0, 60)
-friendBox.Position = UDim2.new(0.075, 0, 0, 536)
+friendBox.Position = UDim2.new(0.075, 0, 0, 581)
 friendBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 friendBox.Text = Features.Friends
 friendBox.TextColor3 = Color3.new(1, 1, 1)
@@ -780,7 +819,7 @@ end)
 -- ── Target List ──
 local targetLabel = Instance.new("TextLabel", ScrollFrame)
 targetLabel.Size = UDim2.new(1, 0, 0, 20)
-targetLabel.Position = UDim2.new(0, 0, 0, 608)
+targetLabel.Position = UDim2.new(0, 0, 0, 653)
 targetLabel.BackgroundTransparency = 1
 targetLabel.Text = "TARGET LIST (BLACK)"
 targetLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -789,7 +828,7 @@ targetLabel.TextSize = 10; targetLabel.ZIndex = 2
 
 local targetBox = Instance.new("TextBox", ScrollFrame)
 targetBox.Size = UDim2.new(0.85, 0, 0, 60)
-targetBox.Position = UDim2.new(0.075, 0, 0, 631)
+targetBox.Position = UDim2.new(0.075, 0, 0, 676)
 targetBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 targetBox.Text = Features.Targets
 targetBox.TextColor3 = Color3.new(1, 1, 1)
@@ -866,4 +905,4 @@ if LocalPlayer.Character then
     task.spawn(arc_onCharacter, LocalPlayer.Character)
 end
 
-print("RB FULL SYSTEM LOADED - HIDDEN + RAINBOW NAME + REVERTED RAG + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET + KA ANIMS + NOSLOWDOWN")
+print("RB FULL SYSTEM LOADED - HIDDEN + EXTRA CLIP + RAINBOW NAME + REVERTED RAG + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET + KA ANIMS + NOSLOWDOWN")
