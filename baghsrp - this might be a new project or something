@@ -1,5 +1,6 @@
 -- RB Combat Suite: Friend Edition (V2)
--- Reverted Anti-Rag | White Friend Highlights | Black Target Highlights | Reliable Auto-Save
+-- Reverted Anti-Rag | White Friend Highlights | Black Target Highlights |
+-- Reliable Auto-Save
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -207,7 +208,7 @@ local function UpdateVisuals(currentTarget)
                 h.Adornee = plr.Character
                 h.Parent = plr.Character
                 targetHighlights[plr] = h
-            end
+           end
             targetHighlights[plr].FillTransparency = pulse
         elseif targetHighlights[plr] then
             targetHighlights[plr]:Destroy()
@@ -266,11 +267,9 @@ local function arc_onCharacter(char)
     _arc_conn = RunService.Heartbeat:Connect(function()
         if not Features.AntiRag or not char.Parent then return end
         if _arc_inReturn then return end
-        local total, disabled = 0, 0
-        for _, v in char:GetDescendants() do
-            if v:IsA("Motor6D") then total += 1 if not v.Enabled then disabled += 1 end end
-        end
-        if total >= 12 and disabled / total >= 0.9 then
+        
+        -- State monitoring verification logic
+        if hum:GetState() == Enum.HumanoidStateType.Physics then
             if not _arc_origCF then _arc_origCF = hrp.CFrame end
             if _arc_wasGrabbed then
                 if not _arc_cleaned then arc_forceEndRagdoll(char) _arc_cleaned = true end
@@ -340,7 +339,6 @@ local function getOffsetCFrame()
         else baseY = 0 end
     end
 
-    -- We handle extraY inside the Heartbeat loop now to manage the delay properly
     local x = customDesyncEnabled and (tonumber(TextBoxX.Text) or 0) or 0
     local z
     if customDesyncEnabled then
@@ -404,7 +402,6 @@ RunService.Heartbeat:Connect(function()
     desyncT.loc = root.CFrame
     local offset = getOffsetCFrame()
 
-    -- Apply the extra -10 only after the 0.5s delay
     local extraY = currentlyUsingExtra and -10 or 0
     local camOffsetY = currentlyUsingExtra and 20 or 10
 
@@ -547,7 +544,8 @@ end)
 --  GUI
 -- ────────────────────────────────────────────────
 local sg = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
-sg.Name = "RBGui"; sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false; sg.DisplayOrder = 2147483647
+sg.Name = "RBGui"
+sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false; sg.DisplayOrder = 2147483647
 
 -- ────────────────────────────────────────────────
 --  NOTIFICATION SYSTEM
@@ -653,10 +651,11 @@ end
 --  MAIN FRAME
 -- ────────────────────────────────────────────────
 local MainFrame = Instance.new("Frame", sg)
-MainFrame.Size = UDim2.new(0, 260, 0, 600)  -- slightly taller for extra row
+MainFrame.Size = UDim2.new(0, 260, 0, 600)
 MainFrame.Position = UDim2.new(1, -280, 0.5, -300)
 MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
-MainFrame.BorderSizePixel = 0; MainFrame.Active = true; MainFrame.ClipsDescendants = true
+MainFrame.BorderSizePixel = 0;
+MainFrame.Active = true; MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame)
 
 local frameStroke = Instance.new("UIStroke", MainFrame)
@@ -667,8 +666,10 @@ local Trigger = Instance.new("TextButton", sg)
 Trigger.Size = UDim2.new(0, 50, 0, 50)
 Trigger.Position = UDim2.new(1, -65, 0, 120)
 Trigger.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-Trigger.Text = "+"; Trigger.TextColor3 = Color3.new(1, 1, 1)
-Trigger.TextSize = 25; Trigger.Font = Enum.Font.GothamBold; Trigger.ZIndex = 10
+Trigger.Text = "+";
+Trigger.TextColor3 = Color3.new(1, 1, 1)
+Trigger.TextSize = 25; Trigger.Font = Enum.Font.GothamBold;
+Trigger.ZIndex = 10
 Instance.new("UICorner", Trigger).CornerRadius = UDim.new(1, 0)
 local triggerStroke = Instance.new("UIStroke", Trigger)
 triggerStroke.Thickness = 2
@@ -704,9 +705,11 @@ Trigger.MouseButton1Click:Connect(function()
 end)
 
 local title = Instance.new("TextLabel", MainFrame)
-title.Size = UDim2.new(1, 0, 0, 40); title.BackgroundTransparency = 1
+title.Size = UDim2.new(1, 0, 0, 40);
+title.BackgroundTransparency = 1
 title.Text = "RB // COMBAT"; title.TextColor3 = Color3.new(1, 1, 1)
-title.Font = Enum.Font.GothamBold; title.TextSize = 14; title.ZIndex = 2
+title.Font = Enum.Font.GothamBold; title.TextSize = 14;
+title.ZIndex = 2
 
 local ScrollFrame = Instance.new("ScrollingFrame", MainFrame)
 ScrollFrame.Size = UDim2.new(1, 0, 1, -40)
@@ -715,7 +718,7 @@ ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.BorderSizePixel = 0
 ScrollFrame.ScrollBarThickness = 3
 ScrollFrame.ScrollBarImageColor3 = Color3.new(1, 1, 1)
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 840)  -- +45 for extra row
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 840)
 ScrollFrame.ZIndex = 2
 
 local keybindButtons = {}
@@ -725,9 +728,11 @@ local function CreateFeature(name, pos)
     bg.Size = UDim2.new(0, 155, 0, 38)
     bg.Position = UDim2.new(0.075, 0, 0, pos)
     bg.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    bg.Text = name; bg.Font = Enum.Font.GothamSemibold
+    bg.Text = name;
+    bg.Font = Enum.Font.GothamSemibold
     bg.TextSize = 12; bg.TextColor3 = Color3.new(0.8, 0.8, 0.8)
-    bg.AutoButtonColor = false; bg.ZIndex = 2
+    bg.AutoButtonColor = false;
+    bg.ZIndex = 2
     Instance.new("UICorner", bg)
 
     local ind = Instance.new("Frame", bg)
@@ -746,7 +751,8 @@ local function CreateFeature(name, pos)
     kb.Font = Enum.Font.GothamSemibold
     kb.TextSize = 10
     kb.TextColor3 = Color3.new(1, 1, 1)
-    kb.AutoButtonColor = false; kb.ZIndex = 2
+    kb.AutoButtonColor = false;
+    kb.ZIndex = 2
     Instance.new("UICorner", kb)
     local kbStroke = Instance.new("UIStroke", kb)
     kbStroke.Thickness = 1
@@ -772,7 +778,8 @@ local function CreateFeature(name, pos)
                 prev.button.TextColor3 = Color3.new(1, 1, 1)
             end
             bindingFor = name
-            kb.Text = "..."; kb.TextColor3 = Color3.new(1, 1, 1)
+            kb.Text = "...";
+            kb.TextColor3 = Color3.new(1, 1, 1)
         end
     end)
 end
@@ -784,8 +791,8 @@ CreateFeature("AntiRag",            145)
 CreateFeature("DeathTP",            190)
 CreateFeature("GrabSpam",           235)
 CreateFeature("Hidden",             280)
-CreateFeature("- Extra Clip",       325)  -- sits under Hidden, +45 from it
-CreateFeature("RainbowName",        370)  -- everything below shifted +45
+CreateFeature("- Extra Clip",        325)
+CreateFeature("RainbowName",        370)
 CreateFeature("AntiVoid",           415)
 CreateFeature("NoSlowdown",         460)
 CreateFeature("Reset",              505)
@@ -798,7 +805,8 @@ friendLabel.BackgroundTransparency = 1
 friendLabel.Text = "FRIEND WHITELIST (WHITE)"
 friendLabel.TextColor3 = FRIEND_COLOR
 friendLabel.Font = Enum.Font.GothamBold
-friendLabel.TextSize = 10; friendLabel.ZIndex = 2
+friendLabel.TextSize = 10;
+friendLabel.ZIndex = 2
 
 local friendBox = Instance.new("TextBox", ScrollFrame)
 friendBox.Size = UDim2.new(0.85, 0, 0, 60)
@@ -806,9 +814,11 @@ friendBox.Position = UDim2.new(0.075, 0, 0, 581)
 friendBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 friendBox.Text = Features.Friends
 friendBox.TextColor3 = Color3.new(1, 1, 1)
-friendBox.TextSize = 12; friendBox.Font = Enum.Font.Gotham
+friendBox.TextSize = 12;
+friendBox.Font = Enum.Font.Gotham
 friendBox.ClearTextOnFocus = false; friendBox.TextWrapped = true
-friendBox.TextYAlignment = Enum.TextYAlignment.Top; friendBox.ZIndex = 2
+friendBox.TextYAlignment = Enum.TextYAlignment.Top;
+friendBox.ZIndex = 2
 Instance.new("UICorner", friendBox)
 
 friendBox.FocusLost:Connect(function()
@@ -824,7 +834,8 @@ targetLabel.BackgroundTransparency = 1
 targetLabel.Text = "TARGET LIST (BLACK)"
 targetLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 targetLabel.Font = Enum.Font.GothamBold
-targetLabel.TextSize = 10; targetLabel.ZIndex = 2
+targetLabel.TextSize = 10;
+targetLabel.ZIndex = 2
 
 local targetBox = Instance.new("TextBox", ScrollFrame)
 targetBox.Size = UDim2.new(0.85, 0, 0, 60)
@@ -832,9 +843,11 @@ targetBox.Position = UDim2.new(0.075, 0, 0, 676)
 targetBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 targetBox.Text = Features.Targets
 targetBox.TextColor3 = Color3.new(1, 1, 1)
-targetBox.TextSize = 12; targetBox.Font = Enum.Font.Gotham
+targetBox.TextSize = 12;
+targetBox.Font = Enum.Font.Gotham
 targetBox.ClearTextOnFocus = false; targetBox.TextWrapped = true
-targetBox.TextYAlignment = Enum.TextYAlignment.Top; targetBox.ZIndex = 2
+targetBox.TextYAlignment = Enum.TextYAlignment.Top;
+targetBox.ZIndex = 2
 Instance.new("UICorner", targetBox)
 
 targetBox.FocusLost:Connect(function()
