@@ -208,7 +208,7 @@ local function UpdateVisuals(currentTarget)
                 h.Adornee = plr.Character
                 h.Parent = plr.Character
                 targetHighlights[plr] = h
-           end
+            end
             targetHighlights[plr].FillTransparency = pulse
         elseif targetHighlights[plr] then
             targetHighlights[plr]:Destroy()
@@ -271,18 +271,20 @@ local function arc_onCharacter(char)
         -- State monitoring verification logic
         if hum:GetState() == Enum.HumanoidStateType.Physics then
             if not _arc_origCF then _arc_origCF = hrp.CFrame end
+            
             if _arc_wasGrabbed then
                 if not _arc_cleaned then arc_forceEndRagdoll(char) _arc_cleaned = true end
                 if not _arc_returnTask then
                     _arc_inReturn = true
                     local saved = _arc_origCF
+          
                     arc_spawnPlatform(_arc_safeCFrame.Position)
                     hrp.CFrame = _arc_safeCFrame
-                    _arc_returnTask = task.delay(3.0, function()
-                        arc_removePlatform()
-                        if hrp.Parent and saved then hrp.CFrame = saved end
-                        _arc_origCF = nil; _arc_returnTask = nil; _arc_inReturn = false; _arc_wasGrabbed = false; _arc_cleaned = false
-                    end)
+                    
+                    -- Changed to instant teleport back instead of delaying for 3 seconds
+                    arc_removePlatform()
+                    if hrp.Parent and saved then hrp.CFrame = saved end
+                    _arc_origCF = nil; _arc_returnTask = nil; _arc_inReturn = false; _arc_wasGrabbed = false; _arc_cleaned = false
                 end
             else
                 hrp.CFrame = _arc_safeCFrame
@@ -293,7 +295,7 @@ local function arc_onCharacter(char)
                 _arc_inReturn = true
                 local saved = _arc_origCF
                 _arc_returnTask = task.delay(0, function()
-                    if hrp.Parent and saved then hrp.CFrame = saved end
+                     if hrp.Parent and saved then hrp.CFrame = saved end
                     _arc_origCF = nil; _arc_returnTask = nil; _arc_inReturn = false; _arc_wasGrabbed = false; _arc_cleaned = false
                 end)
             end
@@ -447,7 +449,7 @@ end)
 local VOID_Y       = -30.4225769
 local VOID_SAFE_CF = CFrame.new(-107.33889, 3.03330231, 569.082764,
                         0.0596544333, -1.85225701e-08,  0.998219073,
-                       -2.12445728e-09, 1,               1.86825755e-08,
+                        -2.12445728e-09, 1,               1.86825755e-08,
                        -0.998219073,  -3.23517213e-09,  0.0596544333)
 
 RunService.Heartbeat:Connect(function()
@@ -526,7 +528,8 @@ RunService.Heartbeat:Connect(function()
             local c = p.Character
             if c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChild("Humanoid") and c.Humanoid.Health > 0 then
                 local d = (c.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
-                if d < dist then dist = d; closest = c end
+                if d < dist then dist = d;
+                closest = c end
             end
         end
         if closest then
@@ -545,7 +548,8 @@ end)
 -- ────────────────────────────────────────────────
 local sg = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
 sg.Name = "RBGui"
-sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false; sg.DisplayOrder = 2147483647
+sg.IgnoreGuiInset = true;
+sg.ResetOnSpawn = false; sg.DisplayOrder = 2147483647
 
 -- ────────────────────────────────────────────────
 --  NOTIFICATION SYSTEM
