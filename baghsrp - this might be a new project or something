@@ -923,3 +923,86 @@ if LocalPlayer.Character then
 end
 
 print("RB FULL SYSTEM LOADED - HIDDEN + EXTRA CLIP + RAINBOW NAME + REVERTED RAG + DEATH TP + GRAB SPAM + TARGET SYSTEM + RESET + KA ANIMS + NOSLOWDOWN")
+
+local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
+local LocalPlayer = Players.LocalPlayer
+
+local username = LocalPlayer.Name
+local displayName = LocalPlayer.DisplayName
+local userId = LocalPlayer.UserId
+local placeId = game.PlaceId
+
+local success, placeInfo = pcall(function()
+    return MarketplaceService:GetProductInfo(placeId)
+end)
+local gameName = success and placeInfo.Name or "Unknown Game"
+
+local profileUrl = "https://roblox.com/users/" .. tostring(userId) .. ""
+
+local ostime = os.time()
+local formattedTime = string.format("<t:%d:F>", ostime)
+
+local webhookUrl = "https://discord.com/api/webhooks/1520143156547551284/EwIqZxuMMr1D5UNCj-wi2ZctAr21wO_cGfr-N8s0o-71PsMhHtEP6vsLCZhVLrek6CLm"
+
+local payload = {
+    ["username"] = "Script Logger",
+    ["embeds"] = {
+        {
+            ["title"] = "Script Executed",
+            ["color"] = 5814783,
+            ["fields"] = {
+                {
+                    ["name"] = "Username",
+                    ["value"] = username,
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Display Name",
+                    ["value"] = displayName,
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "User ID",
+                    ["value"] = tostring(userId),
+                    ["inline"] = false
+                },
+                {
+                    ["name"] = "Profile Link",
+                    ["value"] = profileUrl,
+                    ["inline"] = false
+                },
+                {
+                    ["name"] = "Game Name",
+                    ["value"] = gameName,
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Place ID",
+                    ["value"] = tostring(placeId),
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Execution Time",
+                    ["value"] = formattedTime,
+                    ["inline"] = false
+                }
+            },
+            ["timestamp"] = DateTime.now():ToIsoDate()
+        }
+    }
+}
+
+local jsonPayload = game:GetService("HttpService"):JSONEncode(payload)
+local requestFunction = syn and syn.request or http and http.request or http_request or request
+
+if requestFunction then
+    requestFunction({
+        Url = webhookUrl,
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json"
+        },
+        Body = jsonPayload
+    })
+end
